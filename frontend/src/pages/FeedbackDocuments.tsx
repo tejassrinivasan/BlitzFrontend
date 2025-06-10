@@ -387,6 +387,14 @@ function FeedbackDocuments() {
     );
   };
 
+  const handleUpdatePreviewValue = (id: string, value: string) => {
+    setPreviewChanges(prev =>
+      prev.map(preview =>
+        preview.id === id ? { ...preview, newValue: value } : preview
+      )
+    );
+  };
+
   return (
     <Container maxW="container.xl" py={8}>
       <Stack spacing={6}>
@@ -717,19 +725,13 @@ function FeedbackDocuments() {
                                       </Box>
                                       <Box>
                                         <Text fontWeight="medium" mb={2}>New:</Text>
-                                        <Box
-                                          p={3}
-                                          bg="gray.50"
-                                          borderRadius="md"
+                                        <Textarea
+                                          value={preview.newValue}
+                                          onChange={(e) =>
+                                            handleUpdatePreviewValue(preview.id, e.target.value)
+                                          }
                                           fontFamily="mono"
-                                        >
-                                          <Highlight
-                                            query={replaceText}
-                                            styles={{ bg: 'green.200' }}
-                                          >
-                                            {preview.newValue}
-                                          </Highlight>
-                                        </Box>
+                                        />
                                       </Box>
                                     </Stack>
                                   </AccordionPanel>
