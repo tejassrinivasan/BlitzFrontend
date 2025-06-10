@@ -30,6 +30,21 @@ from .config import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Allowed container names to prevent unauthorized access
+ALLOWED_CONTAINERS = {
+    OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME,
+    UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
+    UNOFFICIAL_USER_FEEDBACK_HELPFUL_CONTAINER_NAME,
+    UNOFFICIAL_USER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
+}
+
+def validate_container_name(container_name: str) -> None:
+    """Ensure the provided container name is one of the expected values."""
+    if container_name not in ALLOWED_CONTAINERS:
+        logger.warning(f"Attempted access to invalid container: {container_name}")
+        raise HTTPException(status_code=400, detail="Invalid container name")
+
 # Initialize Redis client if REDIS_URL is set
 redis_client = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 
@@ -58,6 +73,7 @@ async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List
 
 def get_container_client(container_name: str):
     """Get a container client with error handling."""
+    validate_container_name(container_name)
     try:
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
@@ -82,6 +98,7 @@ async def get_documents(
     limit: int = 20,
     container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to fetch documents from")
 ):
+    validate_container_name(container)
     try:
         logger.info(f"Attempting to fetch documents from container: {container}")
         start_time = time.time()
@@ -134,6 +151,7 @@ async def search_documents(
     q: str = Query(..., description="Search term"),
     container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to search in")
 ):
+    validate_container_name(container)
     try:
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
@@ -164,6 +182,7 @@ async def create_document(
     document: FeedbackDocument,
     container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to create document in")
 ):
+    validate_container_name(container)
     try:
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
@@ -184,6 +203,7 @@ async def update_document(
     document: FeedbackDocument,
     container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to update document in")
 ):
+    validate_container_name(container)
     try:
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
@@ -203,6 +223,7 @@ async def delete_document(
     doc_id: str,
     container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to delete document from")
 ):
+    validate_container_name(container)
     try:
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
@@ -220,6 +241,8 @@ async def transfer_document(
     source_container: str = Query(..., description="Source container name"),
     target_container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Target container name")
 ):
+    validate_container_name(source_container)
+    validate_container_name(target_container)
     try:
         logger.info(f"Transferring document {doc_id} from {source_container} to {target_container}")
         
