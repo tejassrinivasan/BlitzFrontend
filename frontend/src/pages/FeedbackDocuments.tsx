@@ -90,6 +90,7 @@ function FeedbackDocuments() {
   const [replaceText, setReplaceText] = useState('');
   const [previewChanges, setPreviewChanges] = useState<BulkEditPreview[]>([]);
   const [selectAll, setSelectAll] = useState(true);
+  const [matchedDocuments, setMatchedDocuments] = useState<FeedbackDocument[]>([]);
 
   const fetchDocuments = async (pageNum: number = 1, search: string = '') => {
     try {
@@ -289,12 +290,22 @@ function FeedbackDocuments() {
   );
 
   // Function to generate preview of changes
-  const handlePreviewChanges = () => {
+  const handlePreviewChanges = async () => {
     if (!findText) return;
 
-    const previews: BulkEditPreview[] = documents
-      .filter(doc => doc[bulkEditField]?.includes(findText))
-      .map(doc => ({
+    try {
+      const response = await fetch(
+        `/api/feedback/documents/search?q=${encodeURIComponent(findText)}&container=${selectedContainer}&field=${bulkEditField}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch documents');
+      }
+
+      const matched = await response.json();
+      setMatchedDocuments(matched);
+
+      const previews: BulkEditPreview[] = matched.map((doc: FeedbackDocument) => ({
         id: doc.id!,
         field: bulkEditField,
         oldValue: doc[bulkEditField] || '',
@@ -302,7 +313,16 @@ function FeedbackDocuments() {
         selected: true
       }));
 
-    setPreviewChanges(previews);
+      setPreviewChanges(previews);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to search documents',
+        status: 'error',
+        duration: 3000,
+        isClosable: true
+      });
+    }
   };
 
   // Function to apply bulk changes
@@ -312,7 +332,7 @@ function FeedbackDocuments() {
 
     try {
       const updates = selectedPreviews.map(preview => {
-        const doc = documents.find(d => d.id === preview.id);
+        const doc = matchedDocuments.find(d => d.id === preview.id) || documents.find(d => d.id === preview.id);
         if (!doc) return null;
         return {
           ...doc,
@@ -335,6 +355,12 @@ function FeedbackDocuments() {
 
       // Update local state
       setDocuments(docs =>
+        docs.map(doc => {
+          const update = updates.find(u => u.id === doc.id);
+          return update || doc;
+        })
+      );
+      setMatchedDocuments(docs =>
         docs.map(doc => {
           const update = updates.find(u => u.id === doc.id);
           return update || doc;

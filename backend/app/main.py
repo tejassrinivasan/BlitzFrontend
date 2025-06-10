@@ -149,30 +149,34 @@ async def get_documents(
 @app.get("/api/feedback/documents/search", response_model=List[FeedbackDocument])
 async def search_documents(
     q: str = Query(..., description="Search term"),
-    container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to search in")
+    container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to search in"),
+    field: str = Query("UserPrompt", description="Document field to search")
 ):
     validate_container_name(container)
     try:
+        if field not in {"UserPrompt", "Query", "AssistantPrompt"}:
+            raise HTTPException(status_code=400, detail="Invalid field")
+
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
-        
-        query = """
-            SELECT * FROM c 
-            WHERE CONTAINS(LOWER(c.UserPrompt), LOWER(@search_term))
+
+        query = f"""
+            SELECT * FROM c
+            WHERE CONTAINS(LOWER(c.{field}), LOWER(@search_term))
             ORDER BY c._ts DESC
         """
         parameters = [
             {"name": "@search_term", "value": q.lower()}
         ]
-        
+
         items = list(container_client.query_items(
             query=query,
             parameters=parameters,
             enable_cross_partition_query=True
         ))
-        
+
         return items
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
