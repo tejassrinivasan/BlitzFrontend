@@ -21,10 +21,16 @@ from .config import (
     UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
     UNOFFICIAL_USER_FEEDBACK_HELPFUL_CONTAINER_NAME,
     UNOFFICIAL_USER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
+    NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    CONTAINER_DISPLAY_NAMES,
     OPENAI_ENDPOINT,
     OPENAI_API_VERSION,
-    OPENAI_DEPLOYMENT
+    OPENAI_DEPLOYMENT,
+    AVAILABLE_DATABASES
 )
+from .postgres_service import postgres_service
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +39,10 @@ logger = logging.getLogger(__name__)
 # Allowed container names to prevent unauthorized access
 ALLOWED_CONTAINERS = {
     OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    # Keep legacy containers for backwards compatibility
     UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME,
     UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
     UNOFFICIAL_USER_FEEDBACK_HELPFUL_CONTAINER_NAME,
@@ -154,7 +164,7 @@ async def search_documents(
 ):
     validate_container_name(container)
     try:
-        if field not in {"UserPrompt", "Query", "AssistantPrompt"}:
+        if field not in {"UserPrompt", "Query"}:
             raise HTTPException(status_code=400, detail="Invalid field")
 
         credential = DefaultAzureCredential()
@@ -261,19 +271,25 @@ async def transfer_document(
         doc["id"] = str(uuid4())
         
         # If transferring to official container, generate embeddings
-        if target_container == OFFICIAL_DOCUMENTS_CONTAINER_NAME:
+        is_official_target = target_container in ["mlb", "nba-official"]
+        if is_official_target:
             openai_client = AsyncAzureOpenAI(
                 azure_endpoint=OPENAI_ENDPOINT,
                 api_version=OPENAI_API_VERSION,
                 api_key=os.getenv("AZURE_OPENAI_API_KEY")
             )
             
+            logger.info(f"Generating embeddings for transfer to official container: {target_container}")
+            
+            # Generate embeddings using text-embeddings-ada-002 model
             if doc.get("UserPrompt"):
-                doc["UserPromptVector"] = await get_embedding(openai_client, doc["UserPrompt"], OPENAI_DEPLOYMENT)
+                logger.info("Generating embedding for UserPrompt")
+                doc["userpromptvector"] = await get_embedding(openai_client, doc["UserPrompt"], "text-embedding-ada-002")
             if doc.get("Query"):
-                doc["QueryVector"] = await get_embedding(openai_client, doc["Query"], OPENAI_DEPLOYMENT)
-            if doc.get("AssistantPrompt"):
-                doc["AssistantPromptVector"] = await get_embedding(openai_client, doc["AssistantPrompt"], OPENAI_DEPLOYMENT)
+                logger.info("Generating embedding for Query")  
+                doc["queryvector"] = await get_embedding(openai_client, doc["Query"], "text-embedding-ada-002")
+            
+            logger.info("Embeddings generated successfully")
         
         # Create in target container
         response = target_container_client.create_item(doc)
@@ -297,4 +313,84 @@ async def transfer_document(
         return response
     except Exception as e:
         logger.error(f"Error in transfer_document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/feedback/containers")
+async def get_feedback_containers():
+    """Get list of available feedback containers with display names."""
+    return {
+        "containers": [
+            {"value": "mlb", "label": "MLB Official"},
+            {"value": "mlb-unofficial", "label": "MLB Unofficial"},
+            {"value": "nba-official", "label": "NBA Official"},
+            {"value": "nba-unofficial", "label": "NBA Unofficial"}
+        ]
+    }
+
+# PostgreSQL Query Endpoints
+
+@app.get("/api/databases")
+async def get_available_databases():
+    """Get list of available databases for queries."""
+    try:
+        databases = postgres_service.get_available_databases()
+        return {"databases": databases}
+    except Exception as e:
+        logger.error(f"Error getting available databases: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query")
+async def execute_query(
+    request: Dict[str, str]
+):
+    """Execute a SQL query against the specified database."""
+    try:
+        database = request.get("database")
+        query = request.get("query")
+        
+        if not database:
+            raise HTTPException(status_code=400, detail="Database is required")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        if not postgres_service.validate_database(database):
+            raise HTTPException(status_code=400, detail=f"Invalid database: {database}")
+        
+        logger.info(f"Executing query on {database}: {query[:100]}...")
+        result = postgres_service.execute_query(database, query)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/databases/{database}/test")
+async def test_database_connection(database: str):
+    """Test connection to a specific database."""
+    try:
+        if not postgres_service.validate_database(database):
+            raise HTTPException(status_code=400, detail=f"Invalid database: {database}")
+        
+        result = postgres_service.test_connection(database)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error testing database connection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/databases/{database}/tables")
+async def get_database_tables(database: str):
+    """Get list of tables in the specified database."""
+    try:
+        if not postgres_service.validate_database(database):
+            raise HTTPException(status_code=400, detail=f"Invalid database: {database}")
+        
+        result = postgres_service.get_tables(database)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting database tables: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 

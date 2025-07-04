@@ -19,4 +19,33 @@ export interface ApiResponse {
 export interface ApiError {
   error: string;
   message: string;
+}
+
+export interface QueryRequest {
+  database: string;
+  query: string;
+}
+
+export interface QueryResult {
+  success: boolean;
+  data?: any[];
+  columns?: string[];
+  row_count?: number;
+  query?: string;
+  database?: string;
+  error?: string;
+  message?: string;
+}
+
+export interface DatabaseInfo {
+  databases: string[];
+}
+
+export interface ContainerOption {
+  value: string;
+  label: string;
+}
+
+export interface ContainersResponse {
+  containers: ContainerOption[];
 } 

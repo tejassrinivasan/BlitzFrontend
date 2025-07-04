@@ -20,3 +20,40 @@ UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME = "mlb-partner-feedback-helpf
 UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME = "mlb-partner-feedback-unhelpful" 
 UNOFFICIAL_USER_FEEDBACK_HELPFUL_CONTAINER_NAME = "mlb-user-feedback"
 UNOFFICIAL_USER_FEEDBACK_UNHELPFUL_CONTAINER_NAME = "mlb-user-feedback-unhelpful"
+
+# NBA Containers
+NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-official"
+NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-unofficial"
+MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-unofficial"
+
+# Container display mapping for UI
+CONTAINER_DISPLAY_NAMES = {
+    "mlb": "MLB Official",
+    "mlb-unofficial": "MLB Unofficial", 
+    "nba-official": "NBA Official",
+    "nba-unofficial": "NBA Unofficial"
+}
+
+# PostgreSQL Database Configurations
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+
+# Available PostgreSQL databases for queries
+AVAILABLE_DATABASES = {
+    "mlb": {
+        "host": POSTGRES_HOST,
+        "port": POSTGRES_PORT,
+        "database": "mlb",
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD
+    },
+    "nba": {
+        "host": POSTGRES_HOST,
+        "port": POSTGRES_PORT,
+        "database": "nba",
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD
+    }
+}

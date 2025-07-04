@@ -4,7 +4,6 @@ export interface FeedbackDocument {
   id: string;
   UserPrompt: string;
   Query: string;
-  AssistantPrompt: string;
   timestamp: number;
   isOfficial: boolean;
 }
@@ -36,8 +35,7 @@ export function searchDocuments(query: string, isOfficial: boolean = false): Fee
       .filter(doc => 
         doc.isOfficial === isOfficial &&
         (doc.UserPrompt.toLowerCase().includes(searchTerm) ||
-         doc.Query.toLowerCase().includes(searchTerm) ||
-         doc.AssistantPrompt.toLowerCase().includes(searchTerm))
+         doc.Query.toLowerCase().includes(searchTerm))
       )
       .sort((a, b) => b.timestamp - a.timestamp);
   } catch (error) {

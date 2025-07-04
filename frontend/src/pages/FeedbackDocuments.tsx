@@ -45,26 +45,24 @@ import {
   Th,
   Td,
 } from '@chakra-ui/react';
-import { SearchIcon, EditIcon, DeleteIcon, ArrowUpIcon, RepeatIcon } from '@chakra-ui/icons';
+import { SearchIcon, EditIcon, DeleteIcon, ArrowUpIcon, RepeatIcon, ChevronRightIcon, ArrowBackIcon } from '@chakra-ui/icons';
 import debounce from 'lodash/debounce';
 import { FeedbackDocument } from '../server/services/cosmosService';
+import { executeQuery } from '../services/api';
+import type { QueryResult } from '../types/api';
 
 type ContainerType = 
   | 'mlb'
-  | 'mlb-partner-feedback-helpful'
-  | 'mlb-partner-feedback-unhelpful'
-  | 'mlb-user-feedback'
-  | 'mlb-user-feedback-unhelpful';
+  | 'mlb-unofficial'
+  | 'nba-official'
+  | 'nba-unofficial';
 
-const containers = [
-  { id: 'mlb', name: 'Official Documents', description: 'Official MLB feedback documents' },
-  { id: 'mlb-partner-feedback-helpful', name: 'Helpful Partner Feedback', description: 'Helpful feedback from partners' },
-  { id: 'mlb-partner-feedback-unhelpful', name: 'Unhelpful Partner Feedback', description: 'Unhelpful feedback from partners' },
-  { id: 'mlb-user-feedback', name: 'Helpful User Feedback', description: 'Helpful feedback from users' },
-  { id: 'mlb-user-feedback-unhelpful', name: 'Unhelpful User Feedback', description: 'Unhelpful feedback from users' },
-];
+interface ContainerOption {
+  value: string;
+  label: string;
+}
 
-type BulkEditField = 'UserPrompt' | 'Query' | 'AssistantPrompt';
+type BulkEditField = 'UserPrompt' | 'Query';
 
 interface BulkEditPreview {
   id: string;
@@ -82,6 +80,7 @@ function FeedbackDocuments() {
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContainer, setSelectedContainer] = useState<ContainerType>('mlb');
+  const [containers, setContainers] = useState<ContainerOption[]>([]);
   const toast = useToast();
   const [switchingContainer, setSwitchingContainer] = useState(false);
   const { isOpen: isBulkEditOpen, onOpen: onBulkEditOpen, onClose: onBulkEditClose } = useDisclosure();
@@ -91,6 +90,46 @@ function FeedbackDocuments() {
   const [previewChanges, setPreviewChanges] = useState<BulkEditPreview[]>([]);
   const [selectAll, setSelectAll] = useState(true);
   const [matchedDocuments, setMatchedDocuments] = useState<FeedbackDocument[]>([]);
+  const [showingResults, setShowingResults] = useState<Set<string>>(new Set());
+  const [queryResults, setQueryResults] = useState<Record<string, QueryResult>>(() => {
+    // Load cached results from localStorage on component mount
+    try {
+      const cached = localStorage.getItem('feedbackDocuments_queryResults');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [selectedDatabases, setSelectedDatabases] = useState<Record<string, string>>(() => {
+    // Load selected databases from localStorage
+    try {
+      const cached = localStorage.getItem('feedbackDocuments_selectedDatabases');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [queryLoading, setQueryLoading] = useState<Set<string>>(new Set());
+
+  const loadContainers = async () => {
+    try {
+      const response = await fetch('/api/feedback/containers');
+      if (!response.ok) {
+        throw new Error('Failed to load containers');
+      }
+      const data = await response.json();
+      setContainers(data.containers);
+    } catch (error) {
+      console.error('Error loading containers:', error);
+      // Fallback to default containers
+      setContainers([
+        { value: 'mlb', label: 'MLB Official' },
+        { value: 'mlb-unofficial', label: 'MLB Unofficial' },
+        { value: 'nba-official', label: 'NBA Official' },
+        { value: 'nba-unofficial', label: 'NBA Unofficial' }
+      ]);
+    }
+  };
 
   const fetchDocuments = async (pageNum: number = 1, search: string = '') => {
     try {
@@ -130,7 +169,24 @@ function FeedbackDocuments() {
   };
 
   useEffect(() => {
+    loadContainers();
+  }, []);
+
+  // Persist query results to localStorage
+  useEffect(() => {
+    localStorage.setItem('feedbackDocuments_queryResults', JSON.stringify(queryResults));
+  }, [queryResults]);
+
+  // Persist selected databases to localStorage
+  useEffect(() => {
+    localStorage.setItem('feedbackDocuments_selectedDatabases', JSON.stringify(selectedDatabases));
+  }, [selectedDatabases]);
+
+  useEffect(() => {
     setSwitchingContainer(true);
+    // Clear query results when switching containers
+    setQueryResults({});
+    setShowingResults(new Set());
     fetchDocuments(1);
   }, [selectedContainer]);
 
@@ -143,8 +199,7 @@ function FeedbackDocuments() {
         },
         body: JSON.stringify({
           UserPrompt: '',
-          Query: '',
-          AssistantPrompt: ''
+          Query: ''
         })
       });
 
@@ -249,9 +304,23 @@ function FeedbackDocuments() {
   };
 
   const handleTransfer = async (docId: string) => {
+    // Determine the correct target container based on current container
+    const getTargetContainer = (sourceContainer: string): string => {
+      switch (sourceContainer) {
+        case 'mlb-unofficial':
+          return 'mlb';
+        case 'nba-unofficial':
+          return 'nba-official';
+        default:
+          return 'mlb'; // Fallback
+      }
+    };
+
+    const targetContainer = getTargetContainer(selectedContainer);
+
     try {
       const response = await fetch(
-        `/api/feedback/documents/${docId}/transfer?source_container=${selectedContainer}&target_container=mlb`,
+        `/api/feedback/documents/${docId}/transfer?source_container=${selectedContainer}&target_container=${targetContainer}`,
         {
           method: 'POST'
         }
@@ -263,9 +332,11 @@ function FeedbackDocuments() {
 
       setDocuments(docs => docs.filter(doc => doc.id !== docId));
       
+      const targetLabel = targetContainer === 'mlb' ? 'MLB Official' : 'NBA Official';
+      
       toast({
         title: 'Document transferred',
-        description: 'Document transferred to official feedback',
+        description: `Document transferred to ${targetLabel}`,
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -421,6 +492,140 @@ function FeedbackDocuments() {
     );
   };
 
+  const scrollToCard = (docId: string) => {
+    setTimeout(() => {
+      const cardElement = document.querySelector(`[data-card-id="${docId}"]`);
+      if (cardElement) {
+        cardElement.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center' 
+        });
+      }
+    }, 100);
+  };
+
+  // Helper function to get default database based on container
+  const getDefaultDatabase = () => {
+    return selectedContainer === 'nba-official' || selectedContainer === 'nba-unofficial' ? 'nba' : 'mlb';
+  };
+
+  const handleRunQuery = async (docId: string, query: string) => {
+    if (!query.trim()) {
+      toast({
+        title: 'Error',
+        description: 'No query to execute',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    const database = selectedDatabases[docId] || getDefaultDatabase();
+    
+    setQueryLoading(prev => new Set([...prev, docId]));
+    
+    try {
+      const result = await executeQuery({
+        database,
+        query: query.trim()
+      });
+      
+      console.log('Query result for docId:', docId, result);
+      
+      setQueryResults(prev => {
+        const newResults = {
+          ...prev,
+          [docId]: result
+        };
+        console.log('Updated queryResults:', newResults);
+        return newResults;
+      });
+      
+      setShowingResults(prev => new Set([...prev, docId]));
+      
+      if (result.success) {
+        toast({
+          title: 'Query executed successfully',
+          description: `${result.row_count} rows returned from ${database.toUpperCase()} database`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+      } else {
+        toast({
+          title: 'Query failed',
+          description: result.error || 'Unknown error occurred',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+      
+      // Scroll to card after query execution
+      scrollToCard(docId);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to execute query',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setQueryLoading(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(docId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleToggleView = (docId: string) => {
+    console.log('Toggle view for docId:', docId);
+    console.log('Current queryResults:', queryResults);
+    console.log('Has cached result for doc:', !!queryResults[docId]);
+    console.log('Currently showing results:', showingResults.has(docId));
+    
+    setShowingResults(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(docId)) {
+        console.log('Removing from results view');
+        newSet.delete(docId);
+      } else {
+        // Only add to results view if we have cached results
+        if (queryResults[docId]) {
+          console.log('Adding to results view');
+          newSet.add(docId);
+        } else {
+          console.log('No cached results found');
+        }
+      }
+      return newSet;
+    });
+    
+    // Scroll to card after view toggle
+    scrollToCard(docId);
+  };
+
+  const handleRerunQuery = async (docId: string, query: string) => {
+    // Clear existing results and re-run query
+    setQueryResults(prev => {
+      const newResults = { ...prev };
+      delete newResults[docId];
+      return newResults;
+    });
+    
+    await handleRunQuery(docId, query);
+  };
+
+  const handleDatabaseChange = (docId: string, database: string) => {
+    setSelectedDatabases(prev => ({
+      ...prev,
+      [docId]: database
+    }));
+  };
+
   return (
     <Container maxW="container.xl" py={8}>
       <Stack spacing={6}>
@@ -428,7 +633,7 @@ function FeedbackDocuments() {
           <Box>
             <Heading size="lg">Feedback Documents</Heading>
             <Text color="gray.600" mt={2}>
-              {containers.find(c => c.id === selectedContainer)?.description}
+              {containers.find(c => c.value === selectedContainer)?.label || 'Manage and browse feedback documents'}
             </Text>
           </Box>
           <ButtonGroup>
@@ -453,8 +658,8 @@ function FeedbackDocuments() {
             isDisabled={loading}
           >
             {containers.map(container => (
-              <option key={container.id} value={container.id}>
-                {container.name}
+              <option key={container.value} value={container.value}>
+                {container.label}
               </option>
             ))}
           </Select>
@@ -504,6 +709,7 @@ function FeedbackDocuments() {
             {documents.map(doc => (
               <Card 
                 key={doc.id}
+                data-card-id={doc.id}
                 transition="all 0.2s"
                 transform={switchingContainer ? 'scale(0.98)' : 'scale(1)'}
               >
@@ -540,26 +746,98 @@ function FeedbackDocuments() {
                         />
                       </Box>
                       
-                      <Box>
-                        <Text mb={2} fontWeight="medium">Assistant Prompt</Text>
-                        <Textarea
-                          value={editingDoc?.AssistantPrompt ?? ''}
-                          onChange={(e) => setEditingDoc(prev => {
-                            if (!prev) return null;
-                            return {
-                              ...prev,
-                              AssistantPrompt: e.target.value
-                            };
-                          })}
-                        />
-                      </Box>
+
                       
                       <Flex justify="flex-end" gap={2}>
                         <Button onClick={() => setEditingDoc(null)}>Cancel</Button>
                         <Button colorScheme="blue" onClick={handleSave}>Save</Button>
                       </Flex>
                     </Stack>
+                  ) : showingResults.has(doc.id!) && queryResults[doc.id!] ? (
+                    // Results View
+                    <Stack spacing={4}>
+                                              <Flex justify="space-between" align="center">
+                          <Heading size="md">Query Results</Heading>
+                          <ButtonGroup size="sm">
+                            <Button
+                              leftIcon={<RepeatIcon />}
+                              colorScheme="blue"
+                              onClick={() => handleRerunQuery(doc.id!, doc.Query || '')}
+                              isLoading={queryLoading.has(doc.id!)}
+                              loadingText="Running..."
+                              isDisabled={!doc.Query || !doc.Query.trim()}
+                            >
+                              Re-run Query
+                            </Button>
+                            <Button
+                              leftIcon={<ArrowBackIcon />}
+                              onClick={() => handleToggleView(doc.id!)}
+                            >
+                              Back to Query
+                            </Button>
+                          </ButtonGroup>
+                        </Flex>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={2}>
+                          Database: {(selectedDatabases[doc.id!] || getDefaultDatabase()).toUpperCase()}
+                        </Text>
+                        <Text fontSize="sm" color="gray.600">
+                          Rows returned: {queryResults[doc.id!]!.row_count || 0}
+                        </Text>
+                      </Box>
+
+                      {queryResults[doc.id!]!.success ? (
+                        (queryResults[doc.id!]!.data && queryResults[doc.id!]!.data.length > 0) ? (
+                          <Box overflowX="auto">
+                            <Table variant="simple" size="sm">
+                              <Thead>
+                                <Tr>
+                                  {Object.keys(queryResults[doc.id!]!.data[0]).map(column => (
+                                    <Th key={column}>{column}</Th>
+                                  ))}
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {queryResults[doc.id!]!.data.slice(0, 100).map((row, index) => (
+                                  <Tr key={index}>
+                                    {Object.values(row).map((value, cellIndex) => (
+                                      <Td key={cellIndex}>
+                                        {value !== null && value !== undefined ? String(value) : ''}
+                                      </Td>
+                                    ))}
+                                  </Tr>
+                                ))}
+                              </Tbody>
+                            </Table>
+                            {queryResults[doc.id!]!.data.length > 100 && (
+                              <Text fontSize="sm" color="gray.600" mt={2}>
+                                Showing first 100 rows of {queryResults[doc.id!]!.data.length}
+                              </Text>
+                            )}
+                          </Box>
+                        ) : (
+                          <Box p={4} bg="gray.50" borderRadius="md">
+                            <Text>Query executed successfully but returned no results.</Text>
+                          </Box>
+                        )
+                      ) : (
+                        <Box p={4} bg="red.50" borderRadius="md" borderLeft="4px solid" borderColor="red.400">
+                          <Text fontWeight="medium" color="red.600">Query Error</Text>
+                          <Text color="red.600" fontSize="sm">
+                            {queryResults[doc.id!]!.error || 'Unknown error occurred'}
+                          </Text>
+                        </Box>
+                      )}
+
+                      {doc._ts && (
+                        <Text fontSize="sm" color="gray.500">
+                          Last updated: {new Date(doc._ts * 1000).toLocaleString()}
+                        </Text>
+                      )}
+                    </Stack>
                   ) : (
+                    // Query View
                     <Stack spacing={4}>
                       <Box>
                         <Text fontWeight="medium">User Prompt</Text>
@@ -579,10 +857,7 @@ function FeedbackDocuments() {
                         </Box>
                       </Box>
                       
-                      <Box>
-                        <Text fontWeight="medium">Assistant Prompt</Text>
-                        <Text>{doc.AssistantPrompt || '(empty)'}</Text>
-                      </Box>
+
 
                       {doc._ts && (
                         <Text fontSize="sm" color="gray.500">
@@ -590,9 +865,46 @@ function FeedbackDocuments() {
                         </Text>
                       )}
                       
-                      <Flex justify="flex-end" gap={2}>
+                      <Flex justify="space-between" align="center" gap={4}>
+                        {/* Database Selector and Run Button */}
+                        <Flex gap={2} align="center">
+                          <Text fontSize="sm" fontWeight="medium">Database:</Text>
+                          <Select
+                            size="sm"
+                            value={selectedDatabases[doc.id!] || getDefaultDatabase()}
+                            onChange={(e) => handleDatabaseChange(doc.id!, e.target.value)}
+                            width="140px"
+                          >
+                            <option value="mlb">MLB Database</option>
+                            <option value="nba">NBA Database</option>
+                          </Select>
+                          <Button
+                            leftIcon={<ChevronRightIcon />}
+                            colorScheme="green"
+                            size="sm"
+                            onClick={() => {
+                              if (queryResults[doc.id!] && !showingResults.has(doc.id!)) {
+                                handleToggleView(doc.id!);
+                              } else {
+                                handleRunQuery(doc.id!, doc.Query || '');
+                              }
+                            }}
+                            isLoading={queryLoading.has(doc.id!)}
+                            loadingText="Running..."
+                            isDisabled={!doc.Query || !doc.Query.trim()}
+                          >
+                            {(() => {
+                              const hasResults = !!queryResults[doc.id!];
+                              const isShowingResults = showingResults.has(doc.id!);
+                              const buttonText = hasResults && !isShowingResults ? 'View Results' : 'Run Query';
+                              console.log(`Button for ${doc.id}: hasResults=${hasResults}, isShowingResults=${isShowingResults}, buttonText=${buttonText}`);
+                              return buttonText;
+                            })()}
+                          </Button>
+                        </Flex>
+
                         <ButtonGroup size="sm">
-                          {selectedContainer !== 'mlb' && (
+                          {(selectedContainer === 'mlb-unofficial' || selectedContainer === 'nba-unofficial') && (
                             <Button
                               leftIcon={<ArrowUpIcon />}
                               colorScheme="green"
@@ -606,7 +918,10 @@ function FeedbackDocuments() {
                           <IconButton
                             aria-label="Edit"
                             icon={<EditIcon />}
-                            onClick={() => setEditingDoc(doc)}
+                            onClick={() => {
+                              setEditingDoc(doc);
+                              scrollToCard(doc.id!);
+                            }}
                           />
                           <IconButton
                             aria-label="Delete"
@@ -655,7 +970,6 @@ function FeedbackDocuments() {
                     <Stack direction="row" spacing={4}>
                       <Radio value="Query">Query</Radio>
                       <Radio value="UserPrompt">User Prompt</Radio>
-                      <Radio value="AssistantPrompt">Assistant Prompt</Radio>
                     </Stack>
                   </RadioGroup>
                 </FormControl>

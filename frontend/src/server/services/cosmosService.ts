@@ -5,10 +5,8 @@ export interface FeedbackDocument {
   id?: string;
   UserPrompt: string;
   Query: string;
-  AssistantPrompt: string;
   UserPromptVector?: number[];
   QueryVector?: number[];
-  AssistantPromptVector?: number[];
   _ts?: number;
 }
 
