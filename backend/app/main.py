@@ -205,7 +205,26 @@ async def create_document(
         
         doc_dict = document.model_dump(exclude_unset=True)
         doc_dict["id"] = str(uuid4())
-        
+
+        # Generate embeddings if creating in official container
+        if container in [OFFICIAL_DOCUMENTS_CONTAINER_NAME, NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME]:
+            openai_client = AsyncAzureOpenAI(
+                azure_endpoint=OPENAI_ENDPOINT,
+                api_version=OPENAI_API_VERSION,
+                api_key=os.getenv("AZURE_OPENAI_API_KEY")
+            )
+            # Generate embeddings using text-embedding-ada-002 model
+            if doc_dict.get("UserPrompt"):
+                user_prompt_vec = await get_embedding(openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002")
+                if user_prompt_vec is None:
+                    raise HTTPException(status_code=500, detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.")
+                doc_dict["UserPromptVector"] = user_prompt_vec
+            if doc_dict.get("Query"):
+                query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
+                if query_vec is None:
+                    raise HTTPException(status_code=500, detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.")
+                doc_dict["QueryVector"] = query_vec
+
         response = container_client.create_item(doc_dict)
         return response
     except Exception as e:
@@ -226,7 +245,25 @@ async def update_document(
         
         doc_dict = document.model_dump()
         doc_dict["id"] = doc_id
-        
+
+        # Regenerate embeddings if updating in official container
+        if container in [OFFICIAL_DOCUMENTS_CONTAINER_NAME, NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME]:
+            openai_client = AsyncAzureOpenAI(
+                azure_endpoint=OPENAI_ENDPOINT,
+                api_version=OPENAI_API_VERSION,
+                api_key=os.getenv("AZURE_OPENAI_API_KEY")
+            )
+            if doc_dict.get("UserPrompt"):
+                user_prompt_vec = await get_embedding(openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002")
+                if user_prompt_vec is None:
+                    raise HTTPException(status_code=500, detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.")
+                doc_dict["UserPromptVector"] = user_prompt_vec
+            if doc_dict.get("Query"):
+                query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
+                if query_vec is None:
+                    raise HTTPException(status_code=500, detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.")
+                doc_dict["QueryVector"] = query_vec
+
         response = container_client.upsert_item(doc_dict)
         return response
     except Exception as e:
@@ -281,13 +318,13 @@ async def transfer_document(
             
             logger.info(f"Generating embeddings for transfer to official container: {target_container}")
             
-            # Generate embeddings using text-embeddings-ada-002 model
+            # Generate embeddings using text-embedding-ada-002 model
             if doc.get("UserPrompt"):
                 logger.info("Generating embedding for UserPrompt")
-                doc["userpromptvector"] = await get_embedding(openai_client, doc["UserPrompt"], "text-embedding-ada-002")
+                doc["UserPromptVector"] = await get_embedding(openai_client, doc["UserPrompt"], "text-embedding-ada-002")
             if doc.get("Query"):
                 logger.info("Generating embedding for Query")  
-                doc["queryvector"] = await get_embedding(openai_client, doc["Query"], "text-embedding-ada-002")
+                doc["QueryVector"] = await get_embedding(openai_client, doc["Query"], "text-embedding-ada-002")
             
             logger.info("Embeddings generated successfully")
         
