@@ -36,6 +36,7 @@ import {
 import { generateInsights, startConversation, getAvailableDatabases, executeQuery } from './services/api';
 import type { ApiResponse, QueryResult } from './types/api';
 import FeedbackDocuments from './pages/FeedbackDocuments';
+import SchemaExplorer from './pages/SchemaExplorer';
 
 function QueryInterface() {
   const [question, setQuestion] = useState('');
@@ -399,6 +400,7 @@ function App() {
           <TabList bg="white" borderBottomWidth="1px" px={8}>
             <Tab>AI Query Interface</Tab>
             <Tab>SQL Query Runner</Tab>
+            <Tab>Schema Explorer</Tab>
             <Tab>Feedback Documents</Tab>
           </TabList>
 
@@ -408,6 +410,9 @@ function App() {
             </TabPanel>
             <TabPanel>
               <SQLQueryRunner />
+            </TabPanel>
+            <TabPanel>
+              <SchemaExplorer />
             </TabPanel>
             <TabPanel>
               <FeedbackDocuments />
