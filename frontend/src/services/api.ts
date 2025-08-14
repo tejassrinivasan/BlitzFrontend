@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse } from '../types/api';
+import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
 const api = axios.create({
   baseURL: '/api',
@@ -43,4 +43,15 @@ export const getDatabaseTables = async (database: string): Promise<QueryResult> 
 export const getFeedbackContainers = async (): Promise<ContainersResponse> => {
   const response = await api.get<ContainersResponse>('/feedback/containers');
   return response.data;
-}; 
+};
+
+// Container definitions for UI
+export const containers: { id: ContainerType; name: string; description: string }[] = [
+  { id: 'mlb', name: 'MLB Official', description: 'Official MLB feedback documents' },
+  { id: 'mlb-partner-feedback-helpful', name: 'MLB Partner Feedback (Helpful)', description: 'Helpful partner feedback documents' },
+  { id: 'mlb-partner-feedback-unhelpful', name: 'MLB Partner Feedback (Unhelpful)', description: 'Unhelpful partner feedback documents' },
+  { id: 'mlb-user-feedback', name: 'MLB User Feedback', description: 'User feedback documents' },
+  { id: 'mlb-user-feedback-unhelpful', name: 'MLB User Feedback (Unhelpful)', description: 'Unhelpful user feedback documents' },
+  { id: 'nba-official', name: 'NBA Official', description: 'Official NBA feedback documents' },
+  { id: 'nba-unofficial', name: 'NBA Unofficial', description: 'Unofficial NBA feedback documents' },
+]; 

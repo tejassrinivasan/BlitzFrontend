@@ -191,6 +191,54 @@ async def search_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/feedback/documents/all", response_model=List[FeedbackDocument])
+async def get_all_documents(
+    container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to fetch all documents from")
+):
+    """Get all documents from a container without pagination."""
+    validate_container_name(container)
+    try:
+        logger.info(f"Attempting to fetch all documents from container: {container}")
+        start_time = time.time()
+
+        # Try to get from cache first
+        cache_key = f"feedback_documents_all:{container}"
+        if redis_client:
+            cached_data = redis_client.get(cache_key)
+            if cached_data:
+                logger.info(f"Retrieved all documents from cache for {container}")
+                return json.loads(cached_data)
+
+        container_client = get_container_client(container)
+        
+        query = """
+            SELECT * FROM c 
+            ORDER BY c._ts DESC
+        """
+        
+        items = list(container_client.query_items(
+            query=query,
+            parameters=[],
+            enable_cross_partition_query=True
+        ))
+
+        # Cache the results for 10 minutes (longer since this is all documents)
+        if redis_client:
+            redis_client.setex(
+                cache_key,
+                600,  # 10 minutes
+                json.dumps(items)
+            )
+        
+        end_time = time.time()
+        logger.info(f"All documents fetch completed in {end_time - start_time:.2f} seconds")
+        logger.info(f"Retrieved {len(items)} documents from {container}")
+        
+        return items
+    except Exception as e:
+        logger.error(f"Error in get_all_documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/feedback/documents", response_model=FeedbackDocument)
 async def create_document(
     document: FeedbackDocument,

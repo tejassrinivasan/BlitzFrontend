@@ -48,4 +48,24 @@ export interface ContainerOption {
 
 export interface ContainersResponse {
   containers: ContainerOption[];
+}
+
+export type ContainerType =
+  | 'mlb'
+  | 'mlb-partner-feedback-helpful'
+  | 'mlb-partner-feedback-unhelpful'
+  | 'mlb-user-feedback'
+  | 'mlb-user-feedback-unhelpful'
+  | 'nba-official'
+  | 'nba-unofficial';
+
+export interface FeedbackDocument {
+  id?: string;
+  UserPrompt: string;
+  Query: string;
+  AssistantPrompt: string;
+  UserPromptVector?: number[];
+  QueryVector?: number[];
+  AssistantPromptVector?: number[];
+  _ts?: number;
 } 

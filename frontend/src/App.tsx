@@ -37,6 +37,7 @@ import { generateInsights, startConversation, getAvailableDatabases, executeQuer
 import type { ApiResponse, QueryResult } from './types/api';
 import FeedbackDocuments from './pages/FeedbackDocuments';
 import SchemaExplorer from './pages/SchemaExplorer';
+import UserPrompts from './pages/UserPrompts';
 
 function QueryInterface() {
   const [question, setQuestion] = useState('');
@@ -402,6 +403,7 @@ function App() {
             <Tab>SQL Query Runner</Tab>
             <Tab>Schema Explorer</Tab>
             <Tab>Feedback Documents</Tab>
+            <Tab>User Prompts</Tab>
           </TabList>
 
           <TabPanels>
@@ -416,6 +418,9 @@ function App() {
             </TabPanel>
             <TabPanel>
               <FeedbackDocuments />
+            </TabPanel>
+            <TabPanel>
+              <UserPrompts />
             </TabPanel>
           </TabPanels>
         </Tabs>
