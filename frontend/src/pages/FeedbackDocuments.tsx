@@ -110,6 +110,10 @@ function FeedbackDocuments() {
     }
   });
   const [queryLoading, setQueryLoading] = useState<Set<string>>(new Set());
+  const [tablePage, setTablePage] = useState<Record<string, number>>({});
+  const [tablePageSize] = useState(50); // Show 50 rows per page in table
+  const [showAllMode, setShowAllMode] = useState(false);
+  const [loadingAllDocuments, setLoadingAllDocuments] = useState(false);
 
   const loadContainers = async () => {
     try {
@@ -168,13 +172,93 @@ function FeedbackDocuments() {
     }
   };
 
+  const fetchAllDocuments = async () => {
+    try {
+      setLoadingAllDocuments(true);
+      let allDocs: FeedbackDocument[] = [];
+      let currentPage = 1;
+      let hasMoreDocs = true;
+
+      // Keep fetching until we have all documents
+      while (hasMoreDocs) {
+        const endpoint = `/api/feedback/documents?page=${currentPage}&container=${selectedContainer}&limit=100`;
+        const response = await fetch(endpoint);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch documents');
+        }
+
+        const data = await response.json();
+        allDocs = [...allDocs, ...data];
+        
+        // If we got less than 100 documents, we've reached the end
+        hasMoreDocs = data.length === 100;
+        currentPage++;
+        
+        // Safety check to prevent infinite loops
+        if (currentPage > 100) {
+          console.warn('Reached maximum page limit, stopping fetch');
+          break;
+        }
+      }
+
+      setDocuments(allDocs);
+      setHasMore(false);
+      setShowAllMode(true);
+      
+      toast({
+        title: 'All documents loaded',
+        description: `Loaded ${allDocs.length} documents`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to load all documents',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setLoadingAllDocuments(false);
+    }
+  };
+
   useEffect(() => {
     loadContainers();
   }, []);
 
-  // Persist query results to localStorage
+  // Persist query results to localStorage with size limit
   useEffect(() => {
-    localStorage.setItem('feedbackDocuments_queryResults', JSON.stringify(queryResults));
+    try {
+      // Only store essential data to prevent localStorage bloat
+      const compactResults = Object.fromEntries(
+        Object.entries(queryResults).map(([key, result]) => [
+          key,
+          {
+            ...result,
+            // Limit stored data to prevent memory issues
+            data: result.data ? result.data.slice(0, 100) : [],
+            storedRowCount: result.data ? Math.min(result.data.length, 100) : 0
+          }
+        ])
+      );
+      
+      const serialized = JSON.stringify(compactResults);
+      // Check if the data is too large (> 5MB)
+      if (serialized.length > 5 * 1024 * 1024) {
+        console.warn('Query results too large for localStorage, clearing old results');
+        localStorage.removeItem('feedbackDocuments_queryResults');
+      } else {
+        localStorage.setItem('feedbackDocuments_queryResults', serialized);
+      }
+    } catch (error) {
+      console.warn('Failed to save query results to localStorage:', error);
+      // Clear localStorage if it's full
+      localStorage.removeItem('feedbackDocuments_queryResults');
+    }
   }, [queryResults]);
 
   // Persist selected databases to localStorage
@@ -184,9 +268,15 @@ function FeedbackDocuments() {
 
   useEffect(() => {
     setSwitchingContainer(true);
-    // Clear query results when switching containers
+    // Clear query results when switching containers to free memory
     setQueryResults({});
     setShowingResults(new Set());
+    setTablePage({}); // Reset table pagination
+    setShowAllMode(false); // Reset show all mode
+    
+    // Clear localStorage cache for old container
+    localStorage.removeItem('feedbackDocuments_queryResults');
+    
     fetchDocuments(1);
   }, [selectedContainer]);
 
@@ -355,6 +445,7 @@ function FeedbackDocuments() {
   const debouncedSearch = useCallback(
     debounce((query: string) => {
       setSearchQuery(query);
+      setShowAllMode(false); // Exit show all mode when searching
       fetchDocuments(1, query);
     }, 300),
     [selectedContainer]
@@ -533,10 +624,24 @@ function FeedbackDocuments() {
       
       console.log('Query result for docId:', docId, result);
       
+      // Limit result size to prevent memory issues and white screen
+      const processedResult = {
+        ...result,
+        data: result.data ? result.data.slice(0, 1000) : [], // Limit to 1000 rows max
+        originalRowCount: result.row_count, // Keep track of original count
+        truncated: result.data && result.data.length > 1000
+      };
+      
+      // Clean up large results from memory before storing new ones
       setQueryResults(prev => {
+        // Remove old results to free memory
+        const cleanedResults = Object.fromEntries(
+          Object.entries(prev).slice(-5) // Keep only last 5 results
+        );
+        
         const newResults = {
-          ...prev,
-          [docId]: result
+          ...cleanedResults,
+          [docId]: processedResult
         };
         console.log('Updated queryResults:', newResults);
         return newResults;
@@ -545,9 +650,10 @@ function FeedbackDocuments() {
       setShowingResults(prev => new Set([...prev, docId]));
       
       if (result.success) {
+        const displayCount = processedResult.truncated ? '1000+' : result.row_count;
         toast({
           title: 'Query executed successfully',
-          description: `${result.row_count} rows returned from ${database.toUpperCase()} database`,
+          description: `${displayCount} rows returned from ${database.toUpperCase()} database${processedResult.truncated ? ' (showing first 1000)' : ''}`,
           status: 'success',
           duration: 3000,
           isClosable: true,
@@ -644,6 +750,29 @@ function FeedbackDocuments() {
             >
               Bulk Edit
             </Button>
+            {!showAllMode && !searchQuery && (
+              <Button
+                colorScheme="orange"
+                onClick={fetchAllDocuments}
+                isLoading={loadingAllDocuments}
+                loadingText="Loading All..."
+                isDisabled={loading || switchingContainer}
+              >
+                Show All Documents
+              </Button>
+            )}
+            {showAllMode && (
+              <Button
+                colorScheme="gray"
+                onClick={() => {
+                  setShowAllMode(false);
+                  fetchDocuments(1);
+                }}
+                isDisabled={loading || switchingContainer}
+              >
+                Back to Pagination
+              </Button>
+            )}
             <Button colorScheme="blue" onClick={handleCreate}>
               New Document
             </Button>
@@ -783,37 +912,92 @@ function FeedbackDocuments() {
                           Database: {(selectedDatabases[doc.id!] || getDefaultDatabase()).toUpperCase()}
                         </Text>
                         <Text fontSize="sm" color="gray.600">
-                          Rows returned: {queryResults[doc.id!]!.row_count || 0}
+                          Rows returned: {queryResults[doc.id!]!.originalRowCount || queryResults[doc.id!]!.row_count || 0}
+                          {queryResults[doc.id!]!.truncated && (
+                            <Text as="span" color="orange.600" ml={2}>
+                              (truncated to 1000 rows for performance)
+                            </Text>
+                          )}
                         </Text>
                       </Box>
 
                       {queryResults[doc.id!]!.success ? (
                         (queryResults[doc.id!]!.data && queryResults[doc.id!]!.data.length > 0) ? (
-                          <Box overflowX="auto">
-                            <Table variant="simple" size="sm">
-                              <Thead>
-                                <Tr>
-                                  {Object.keys(queryResults[doc.id!]!.data[0]).map(column => (
-                                    <Th key={column}>{column}</Th>
-                                  ))}
-                                </Tr>
-                              </Thead>
-                              <Tbody>
-                                {queryResults[doc.id!]!.data.slice(0, 100).map((row, index) => (
-                                  <Tr key={index}>
-                                    {Object.values(row).map((value, cellIndex) => (
-                                      <Td key={cellIndex}>
-                                        {value !== null && value !== undefined ? String(value) : ''}
-                                      </Td>
+                          <Box>
+                            <Box overflowX="auto" maxH="600px" overflowY="auto">
+                              <Table variant="simple" size="sm">
+                                <Thead position="sticky" top={0} bg="white" zIndex={1}>
+                                  <Tr>
+                                    {Object.keys(queryResults[doc.id!]!.data[0]).map(column => (
+                                      <Th key={column}>{column}</Th>
                                     ))}
                                   </Tr>
-                                ))}
-                              </Tbody>
-                            </Table>
-                            {queryResults[doc.id!]!.data.length > 100 && (
-                              <Text fontSize="sm" color="gray.600" mt={2}>
-                                Showing first 100 rows of {queryResults[doc.id!]!.data.length}
-                              </Text>
+                                </Thead>
+                                <Tbody>
+                                  {(() => {
+                                    const currentPage = tablePage[doc.id!] || 1;
+                                    const startIndex = (currentPage - 1) * tablePageSize;
+                                    const endIndex = startIndex + tablePageSize;
+                                    const pageData = queryResults[doc.id!]!.data.slice(startIndex, endIndex);
+                                    
+                                    return pageData.map((row, index) => (
+                                      <Tr key={startIndex + index}>
+                                        {Object.values(row).map((value, cellIndex) => (
+                                          <Td key={cellIndex} maxW="300px" isTruncated>
+                                            {value !== null && value !== undefined ? String(value) : ''}
+                                          </Td>
+                                        ))}
+                                      </Tr>
+                                    ));
+                                  })()}
+                                </Tbody>
+                              </Table>
+                            </Box>
+                            
+                            {/* Pagination Controls */}
+                            {queryResults[doc.id!]!.data.length > tablePageSize && (
+                              <Flex justify="space-between" align="center" mt={4} p={2} bg="gray.50" borderRadius="md">
+                                <Text fontSize="sm" color="gray.600">
+                                  Showing {((tablePage[doc.id!] || 1) - 1) * tablePageSize + 1} to{' '}
+                                  {Math.min((tablePage[doc.id!] || 1) * tablePageSize, queryResults[doc.id!]!.data.length)} of{' '}
+                                  {queryResults[doc.id!]!.data.length} rows
+                                  {queryResults[doc.id!]!.truncated && (
+                                    <Text as="span" color="orange.600" ml={2}>
+                                      (truncated from {queryResults[doc.id!]!.originalRowCount})
+                                    </Text>
+                                  )}
+                                </Text>
+                                <ButtonGroup size="sm">
+                                  <Button
+                                    onClick={() => setTablePage(prev => ({
+                                      ...prev,
+                                      [doc.id!]: Math.max(1, (prev[doc.id!] || 1) - 1)
+                                    }))}
+                                    isDisabled={(tablePage[doc.id!] || 1) <= 1}
+                                  >
+                                    Previous
+                                  </Button>
+                                  <Text fontSize="sm" px={3} py={2}>
+                                    Page {tablePage[doc.id!] || 1} of{' '}
+                                    {Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize)}
+                                  </Text>
+                                  <Button
+                                    onClick={() => setTablePage(prev => ({
+                                      ...prev,
+                                      [doc.id!]: Math.min(
+                                        Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize),
+                                        (prev[doc.id!] || 1) + 1
+                                      )
+                                    }))}
+                                    isDisabled={
+                                      (tablePage[doc.id!] || 1) >= 
+                                      Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize)
+                                    }
+                                  >
+                                    Next
+                                  </Button>
+                                </ButtonGroup>
+                              </Flex>
                             )}
                           </Box>
                         ) : (
@@ -937,7 +1121,7 @@ function FeedbackDocuments() {
               </Card>
             ))}
 
-            {!searchQuery && hasMore && (
+            {!searchQuery && hasMore && !showAllMode && (
               <Button
                 onClick={() => fetchDocuments(page + 1, searchQuery)}
                 isLoading={loading}
@@ -946,6 +1130,17 @@ function FeedbackDocuments() {
               >
                 {loading ? 'Loading...' : 'Load More'}
               </Button>
+            )}
+
+            {showAllMode && documents.length > 0 && (
+              <Box textAlign="center" p={4} bg="green.50" borderRadius="md">
+                <Text color="green.700" fontWeight="medium">
+                  Showing all {documents.length} documents
+                </Text>
+                <Text fontSize="sm" color="green.600">
+                  All documents are loaded. Use search to filter or switch back to pagination.
+                </Text>
+              </Box>
             )}
 
             {documents.length === 0 && !loading && !switchingContainer && (
