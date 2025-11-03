@@ -31,6 +31,8 @@ export interface QueryResult {
   data?: any[];
   columns?: string[];
   row_count?: number;
+  originalRowCount?: number;
+  truncated?: boolean;
   query?: string;
   database?: string;
   error?: string;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -16,7 +16,6 @@ import {
   InputGroup,
   InputLeftElement,
   ButtonGroup,
-  Badge,
   Select,
   FormControl,
   FormLabel,
@@ -79,7 +78,7 @@ function FeedbackDocuments() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedContainer, setSelectedContainer] = useState<ContainerType>('mlb');
+  const [selectedContainer, setSelectedContainer] = useState<ContainerType>('nba-official');
   const [containers, setContainers] = useState<ContainerOption[]>([]);
   const toast = useToast();
   const [switchingContainer, setSwitchingContainer] = useState(false);
@@ -114,6 +113,16 @@ function FeedbackDocuments() {
   const [tablePageSize] = useState(50); // Show 50 rows per page in table
   const [showAllMode, setShowAllMode] = useState(false);
   const [loadingAllDocuments, setLoadingAllDocuments] = useState(false);
+  const [documentCache, setDocumentCache] = useState<Record<string, FeedbackDocument[]>>(() => {
+    // Load document cache from localStorage
+    try {
+      const cached = localStorage.getItem('feedbackDocuments_documentCache');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [preloadingContainers, setPreloadingContainers] = useState<Set<string>>(new Set());
 
   const loadContainers = async () => {
     try {
@@ -138,6 +147,29 @@ function FeedbackDocuments() {
   const fetchDocuments = async (pageNum: number = 1, search: string = '') => {
     try {
       setLoading(true);
+      
+      // For page 1 non-search requests, check if we have cached documents
+      if (pageNum === 1 && !search && documentCache[selectedContainer] && documentCache[selectedContainer].length > 0) {
+        const cachedDocs = documentCache[selectedContainer];
+        setDocuments(cachedDocs.slice(0, 20)); // Show first page from cache
+        setHasMore(cachedDocs.length > 20);
+        setPage(1);
+        setLoading(false);
+        setSwitchingContainer(false);
+        
+        // If we have a large cache, we can also show "show all" immediately
+        if (cachedDocs.length > 20) {
+          toast({
+            title: 'Documents loaded from cache',
+            description: `${cachedDocs.length} documents available locally`,
+            status: 'success',
+            duration: 2000,
+            isClosable: true,
+          });
+        }
+        return;
+      }
+      
       const endpoint = search
         ? `/api/feedback/documents/search?q=${encodeURIComponent(search)}&container=${selectedContainer}`
         : `/api/feedback/documents?page=${pageNum}&container=${selectedContainer}`;
@@ -152,8 +184,28 @@ function FeedbackDocuments() {
       
       if (pageNum === 1) {
         setDocuments(data);
+        
+        // Update cache for non-search requests
+        if (!search) {
+          setDocumentCache(prev => ({
+            ...prev,
+            [selectedContainer]: data
+          }));
+        }
       } else {
-        setDocuments(prev => [...prev, ...data]);
+        setDocuments(prev => {
+          const newDocs = [...prev, ...data];
+          
+          // Update cache with new documents for non-search requests
+          if (!search) {
+            setDocumentCache(prev => ({
+              ...prev,
+              [selectedContainer]: newDocs
+            }));
+          }
+          
+          return newDocs;
+        });
       }
       
       setHasMore(data.length === 20);
@@ -175,36 +227,45 @@ function FeedbackDocuments() {
   const fetchAllDocuments = async () => {
     try {
       setLoadingAllDocuments(true);
-      let allDocs: FeedbackDocument[] = [];
-      let currentPage = 1;
-      let hasMoreDocs = true;
-
-      // Keep fetching until we have all documents
-      while (hasMoreDocs) {
-        const endpoint = `/api/feedback/documents?page=${currentPage}&container=${selectedContainer}&limit=100`;
-        const response = await fetch(endpoint);
+      
+      // Check if we already have all documents in cache
+      const cachedDocs = documentCache[selectedContainer];
+      if (cachedDocs && cachedDocs.length > 50) { // Assume cache is reasonably complete if > 50 docs
+        setDocuments(cachedDocs);
+        setHasMore(false);
+        setShowAllMode(true);
         
-        if (!response.ok) {
-          throw new Error('Failed to fetch documents');
-        }
-
-        const data = await response.json();
-        allDocs = [...allDocs, ...data];
+        toast({
+          title: 'All documents loaded from cache',
+          description: `${cachedDocs.length} documents`,
+          status: 'success',
+          duration: 2000,
+          isClosable: true,
+        });
         
-        // If we got less than 100 documents, we've reached the end
-        hasMoreDocs = data.length === 100;
-        currentPage++;
-        
-        // Safety check to prevent infinite loops
-        if (currentPage > 100) {
-          console.warn('Reached maximum page limit, stopping fetch');
-          break;
-        }
+        setLoadingAllDocuments(false);
+        return;
+      }
+      
+      // Use the optimized /all endpoint for better performance
+      const endpoint = `/api/feedback/documents/all?container=${selectedContainer}`;
+      const response = await fetch(endpoint);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch all documents');
       }
 
+      const allDocs = await response.json();
+      
       setDocuments(allDocs);
       setHasMore(false);
       setShowAllMode(true);
+      
+      // Update cache with all documents
+      setDocumentCache(prev => ({
+        ...prev,
+        [selectedContainer]: allDocs
+      }));
       
       toast({
         title: 'All documents loaded',
@@ -226,8 +287,48 @@ function FeedbackDocuments() {
     }
   };
 
+  // Preload documents for a container in the background
+  const preloadDocuments = async (container: ContainerType) => {
+    if (preloadingContainers.has(container) || documentCache[container]?.length > 0) {
+      return; // Already preloading or already cached
+    }
+    
+    setPreloadingContainers(prev => new Set([...prev, container]));
+    
+    try {
+      const response = await fetch(`/api/feedback/documents/all?container=${container}`);
+      if (!response.ok) {
+        throw new Error('Failed to preload documents');
+      }
+      
+      const allDocs = await response.json();
+      
+      setDocumentCache(prev => ({
+        ...prev,
+        [container]: allDocs
+      }));
+      
+      console.log(`Preloaded ${allDocs.length} documents for ${container}`);
+    } catch (error) {
+      console.warn(`Failed to preload documents for ${container}:`, error);
+    } finally {
+      setPreloadingContainers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(container);
+        return newSet;
+      });
+    }
+  };
+
   useEffect(() => {
     loadContainers();
+    
+    // Preload NBA Official documents after initial load
+    const preloadTimer = setTimeout(() => {
+      preloadDocuments('nba-official');
+    }, 1000); // Wait 1 second after component mount
+    
+    return () => clearTimeout(preloadTimer);
   }, []);
 
   // Persist query results to localStorage with size limit
@@ -266,6 +367,31 @@ function FeedbackDocuments() {
     localStorage.setItem('feedbackDocuments_selectedDatabases', JSON.stringify(selectedDatabases));
   }, [selectedDatabases]);
 
+  // Persist document cache to localStorage with size limit
+  useEffect(() => {
+    try {
+      // Keep cache size manageable - only store up to 3 containers with max 500 docs each
+      const compactCache = Object.fromEntries(
+        Object.entries(documentCache).slice(-3).map(([container, docs]) => [
+          container,
+          docs.slice(0, 500) // Limit to 500 docs per container
+        ])
+      );
+      
+      const serialized = JSON.stringify(compactCache);
+      // Check if the data is too large (> 10MB)
+      if (serialized.length > 10 * 1024 * 1024) {
+        console.warn('Document cache too large, clearing old entries');
+        localStorage.removeItem('feedbackDocuments_documentCache');
+      } else {
+        localStorage.setItem('feedbackDocuments_documentCache', serialized);
+      }
+    } catch (error) {
+      console.warn('Failed to save document cache to localStorage:', error);
+      localStorage.removeItem('feedbackDocuments_documentCache');
+    }
+  }, [documentCache]);
+
   useEffect(() => {
     setSwitchingContainer(true);
     // Clear query results when switching containers to free memory
@@ -274,10 +400,21 @@ function FeedbackDocuments() {
     setTablePage({}); // Reset table pagination
     setShowAllMode(false); // Reset show all mode
     
-    // Clear localStorage cache for old container
+    // Clear localStorage cache for query results
     localStorage.removeItem('feedbackDocuments_queryResults');
     
     fetchDocuments(1);
+    
+    // Preload other containers in the background for faster switching
+    const otherContainers: ContainerType[] = ['nba-official', 'nba-unofficial', 'mlb', 'mlb-unofficial'];
+    const containersToPreload = otherContainers.filter(c => c !== selectedContainer);
+    
+    // Staggered preloading to avoid overwhelming the server
+    containersToPreload.forEach((container, index) => {
+      setTimeout(() => {
+        preloadDocuments(container);
+      }, (index + 1) * 2000); // 2 second intervals
+    });
   }, [selectedContainer]);
 
   const handleCreate = async () => {
@@ -300,6 +437,13 @@ function FeedbackDocuments() {
       const newDoc = await response.json();
       setDocuments(prev => [newDoc, ...prev]);
       setEditingDoc(newDoc);
+      
+      // Invalidate document cache for this container
+      setDocumentCache(prev => {
+        const updated = { ...prev };
+        delete updated[selectedContainer];
+        return updated;
+      });
 
       toast({
         title: 'Document created',
@@ -339,6 +483,13 @@ function FeedbackDocuments() {
         doc.id === savedDoc.id ? savedDoc : doc
       ));
       setEditingDoc(null);
+      
+      // Invalidate document cache for this container
+      setDocumentCache(prev => {
+        const updated = { ...prev };
+        delete updated[selectedContainer];
+        return updated;
+      });
 
       toast({
         title: 'Document saved',
@@ -375,6 +526,13 @@ function FeedbackDocuments() {
       if (editingDoc?.id === docId) {
         setEditingDoc(null);
       }
+      
+      // Invalidate document cache for this container
+      setDocumentCache(prev => {
+        const updated = { ...prev };
+        delete updated[selectedContainer];
+        return updated;
+      });
 
       toast({
         title: 'Document deleted',
@@ -421,6 +579,14 @@ function FeedbackDocuments() {
       }
 
       setDocuments(docs => docs.filter(doc => doc.id !== docId));
+      
+      // Invalidate document cache for both source and target containers
+      setDocumentCache(prev => {
+        const updated = { ...prev };
+        delete updated[selectedContainer]; // source container
+        delete updated[targetContainer]; // target container
+        return updated;
+      });
       
       const targetLabel = targetContainer === 'mlb' ? 'MLB Official' : 'NBA Official';
       
@@ -922,13 +1088,13 @@ function FeedbackDocuments() {
                       </Box>
 
                       {queryResults[doc.id!]!.success ? (
-                        (queryResults[doc.id!]!.data && queryResults[doc.id!]!.data.length > 0) ? (
+                        (queryResults[doc.id!]!.data && queryResults[doc.id!]!.data!.length > 0) ? (
                           <Box>
                             <Box overflowX="auto" maxH="600px" overflowY="auto">
                               <Table variant="simple" size="sm">
                                 <Thead position="sticky" top={0} bg="white" zIndex={1}>
                                   <Tr>
-                                    {Object.keys(queryResults[doc.id!]!.data[0]).map(column => (
+                                    {Object.keys(queryResults[doc.id!]!.data![0]).map(column => (
                                       <Th key={column}>{column}</Th>
                                     ))}
                                   </Tr>
@@ -938,7 +1104,7 @@ function FeedbackDocuments() {
                                     const currentPage = tablePage[doc.id!] || 1;
                                     const startIndex = (currentPage - 1) * tablePageSize;
                                     const endIndex = startIndex + tablePageSize;
-                                    const pageData = queryResults[doc.id!]!.data.slice(startIndex, endIndex);
+                                    const pageData = queryResults[doc.id!]!.data!.slice(startIndex, endIndex);
                                     
                                     return pageData.map((row, index) => (
                                       <Tr key={startIndex + index}>
@@ -955,12 +1121,12 @@ function FeedbackDocuments() {
                             </Box>
                             
                             {/* Pagination Controls */}
-                            {queryResults[doc.id!]!.data.length > tablePageSize && (
+                            {queryResults[doc.id!]!.data!.length > tablePageSize && (
                               <Flex justify="space-between" align="center" mt={4} p={2} bg="gray.50" borderRadius="md">
                                 <Text fontSize="sm" color="gray.600">
                                   Showing {((tablePage[doc.id!] || 1) - 1) * tablePageSize + 1} to{' '}
-                                  {Math.min((tablePage[doc.id!] || 1) * tablePageSize, queryResults[doc.id!]!.data.length)} of{' '}
-                                  {queryResults[doc.id!]!.data.length} rows
+                                  {Math.min((tablePage[doc.id!] || 1) * tablePageSize, queryResults[doc.id!]!.data!.length)} of{' '}
+                                  {queryResults[doc.id!]!.data!.length} rows
                                   {queryResults[doc.id!]!.truncated && (
                                     <Text as="span" color="orange.600" ml={2}>
                                       (truncated from {queryResults[doc.id!]!.originalRowCount})
@@ -979,19 +1145,19 @@ function FeedbackDocuments() {
                                   </Button>
                                   <Text fontSize="sm" px={3} py={2}>
                                     Page {tablePage[doc.id!] || 1} of{' '}
-                                    {Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize)}
+                                    {Math.ceil(queryResults[doc.id!]!.data!.length / tablePageSize)}
                                   </Text>
                                   <Button
                                     onClick={() => setTablePage(prev => ({
                                       ...prev,
                                       [doc.id!]: Math.min(
-                                        Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize),
+                                        Math.ceil(queryResults[doc.id!]!.data!.length / tablePageSize),
                                         (prev[doc.id!] || 1) + 1
                                       )
                                     }))}
                                     isDisabled={
                                       (tablePage[doc.id!] || 1) >= 
-                                      Math.ceil(queryResults[doc.id!]!.data.length / tablePageSize)
+                                      Math.ceil(queryResults[doc.id!]!.data!.length / tablePageSize)
                                     }
                                   >
                                     Next

@@ -31,6 +31,8 @@ from .config import (
     AVAILABLE_DATABASES
 )
 from .postgres_service import postgres_service
+from .azure_search_service import azure_search_service
+from .cache_service import cache_service
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +70,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Warm cache on startup for better initial performance."""
+    if cache_service.cache_enabled:
+        logger.info("Starting cache warming on server startup...")
+        try:
+            # Warm cache for NBA Official (the default container)
+            container_client = get_container_client(NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME)
+            query = "SELECT * FROM c ORDER BY c._ts DESC"
+            
+            items = list(container_client.query_items(
+                query=query,
+                parameters=[],
+                enable_cross_partition_query=True
+            ))
+            
+            cache_service.warm_cache_for_container(NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME, items)
+            logger.info(f"Startup cache warming completed for {NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME}: {len(items)} documents")
+            
+        except Exception as e:
+            logger.warning(f"Startup cache warming failed: {e}")
+    else:
+        logger.info("Cache warming skipped - Redis not configured")
 
 async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List[float]:
     """Generate embeddings for a given text using Azure OpenAI."""
@@ -113,13 +139,11 @@ async def get_documents(
         logger.info(f"Attempting to fetch documents from container: {container}")
         start_time = time.time()
 
-        # Try to get from cache first
-        cache_key = f"feedback_documents:{container}:page_{page}"
-        if redis_client:
-            cached_data = redis_client.get(cache_key)
-            if cached_data:
-                logger.info(f"Retrieved documents from cache for {container}")
-                return json.loads(cached_data)
+        # Try to get from enhanced cache first
+        cached_data = cache_service.get_page_cache(container, page, limit)
+        if cached_data:
+            logger.info(f"Retrieved documents from cache for {container} (page {page})")
+            return cached_data
 
         container_client = get_container_client(container)
         
@@ -139,13 +163,8 @@ async def get_documents(
             enable_cross_partition_query=True
         ))
 
-        # Cache the results for 5 minutes
-        if redis_client:
-            redis_client.setex(
-                cache_key,
-                300,  # 5 minutes
-                json.dumps(items)
-            )
+        # Cache the results using enhanced cache service
+        cache_service.set_page_cache(container, page, items, limit)
         
         end_time = time.time()
         logger.info(f"Documents fetch completed in {end_time - start_time:.2f} seconds")
@@ -167,6 +186,12 @@ async def search_documents(
         if field not in {"UserPrompt", "Query"}:
             raise HTTPException(status_code=400, detail="Invalid field")
 
+        # Try to get from cache first
+        cached_data = cache_service.get_search_cache(container, q, field)
+        if cached_data:
+            logger.info(f"Retrieved search results from cache for '{q}' in {field}")
+            return cached_data
+
         credential = DefaultAzureCredential()
         cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
         database = cosmos_client.get_database_client(DATABASE_NAME)
@@ -187,8 +212,13 @@ async def search_documents(
             enable_cross_partition_query=True
         ))
 
+        # Cache the search results
+        cache_service.set_search_cache(container, q, field, items)
+        logger.info(f"Search completed for '{q}' in {field}: {len(items)} results")
+
         return items
     except Exception as e:
+        logger.error(f"Error in search_documents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/feedback/documents/all", response_model=List[FeedbackDocument])
@@ -201,13 +231,11 @@ async def get_all_documents(
         logger.info(f"Attempting to fetch all documents from container: {container}")
         start_time = time.time()
 
-        # Try to get from cache first
-        cache_key = f"feedback_documents_all:{container}"
-        if redis_client:
-            cached_data = redis_client.get(cache_key)
-            if cached_data:
-                logger.info(f"Retrieved all documents from cache for {container}")
-                return json.loads(cached_data)
+        # Try to get from enhanced cache first
+        cached_data = cache_service.get_all_cache(container)
+        if cached_data:
+            logger.info(f"Retrieved all documents from cache for {container}")
+            return cached_data
 
         container_client = get_container_client(container)
         
@@ -222,13 +250,8 @@ async def get_all_documents(
             enable_cross_partition_query=True
         ))
 
-        # Cache the results for 10 minutes (longer since this is all documents)
-        if redis_client:
-            redis_client.setex(
-                cache_key,
-                600,  # 10 minutes
-                json.dumps(items)
-            )
+        # Cache the results using enhanced cache service
+        cache_service.set_all_cache(container, items)
         
         end_time = time.time()
         logger.info(f"All documents fetch completed in {end_time - start_time:.2f} seconds")
@@ -274,6 +297,11 @@ async def create_document(
                 doc_dict["QueryVector"] = query_vec
 
         response = container_client.create_item(doc_dict)
+        
+        # Invalidate cache for this container since we added a new document
+        cache_service.invalidate_container_cache(container)
+        logger.info(f"Created document and invalidated cache for container: {container}")
+        
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -313,6 +341,11 @@ async def update_document(
                 doc_dict["QueryVector"] = query_vec
 
         response = container_client.upsert_item(doc_dict)
+        
+        # Invalidate cache for this container since we updated a document
+        cache_service.invalidate_container_cache(container)
+        logger.info(f"Updated document and invalidated cache for container: {container}")
+        
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -329,9 +362,28 @@ async def delete_document(
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
         
+        # Delete from CosmosDB
         container_client.delete_item(item=doc_id, partition_key=doc_id)
+        logger.info(f"Successfully deleted document {doc_id} from CosmosDB container {container}")
+        
+        # Also delete from Azure Search index if this is the NBA Official container
+        if container == NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME:
+            if azure_search_service.is_configured():
+                search_deletion_success = await azure_search_service.delete_document(doc_id)
+                if search_deletion_success:
+                    logger.info(f"Successfully deleted document {doc_id} from Azure Search index")
+                else:
+                    logger.warning(f"Failed to delete document {doc_id} from Azure Search index, but CosmosDB deletion succeeded")
+            else:
+                logger.warning("Azure Search not configured, skipping search index deletion")
+        
+        # Invalidate cache for this container since we deleted a document
+        cache_service.invalidate_container_cache(container)
+        logger.info(f"Deleted document and invalidated cache for container: {container}")
+        
         return {"status": "success", "message": "Document deleted successfully"}
     except Exception as e:
+        logger.error(f"Error deleting document {doc_id} from container {container}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/feedback/documents/{doc_id}/transfer")
@@ -382,17 +434,9 @@ async def transfer_document(
         # Delete from source container
         source_container_client.delete_item(item=doc_id, partition_key=doc_id)
         
-        # Invalidate caches
-        if redis_client:
-            # Invalidate source container cache
-            source_keys = redis_client.keys(f"feedback_documents:{source_container}:page_*")
-            if source_keys:
-                redis_client.delete(*source_keys)
-            
-            # Invalidate target container cache
-            target_keys = redis_client.keys(f"feedback_documents:{target_container}:page_*")
-            if target_keys:
-                redis_client.delete(*target_keys)
+        # Invalidate caches for both containers
+        cache_service.invalidate_container_cache(source_container)
+        cache_service.invalidate_container_cache(target_container)
         
         logger.info(f"Successfully transferred document {doc_id}")
         return response
@@ -478,4 +522,61 @@ async def get_database_tables(database: str):
         raise
     except Exception as e:
         logger.error(f"Error getting database tables: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Cache Management Endpoints
+
+@app.post("/api/feedback/cache/warm/{container}")
+async def warm_cache(container: str):
+    """Warm cache for a specific container."""
+    validate_container_name(container)
+    try:
+        logger.info(f"Warming cache for container: {container}")
+        start_time = time.time()
+        
+        # Fetch all documents to warm the cache
+        container_client = get_container_client(container)
+        query = "SELECT * FROM c ORDER BY c._ts DESC"
+        
+        items = list(container_client.query_items(
+            query=query,
+            parameters=[],
+            enable_cross_partition_query=True
+        ))
+        
+        # Warm the cache with all documents and paginated results
+        cache_service.warm_cache_for_container(container, items)
+        
+        end_time = time.time()
+        logger.info(f"Cache warming completed for {container} in {end_time - start_time:.2f} seconds")
+        
+        return {
+            "status": "success",
+            "message": f"Cache warmed for {container}",
+            "document_count": len(items),
+            "duration_seconds": round(end_time - start_time, 2)
+        }
+    except Exception as e:
+        logger.error(f"Error warming cache for {container}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/feedback/cache/stats")
+async def get_cache_stats():
+    """Get cache statistics."""
+    try:
+        stats = cache_service.get_cache_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/feedback/cache/{container}")
+async def invalidate_cache(container: str):
+    """Invalidate cache for a specific container."""
+    validate_container_name(container)
+    try:
+        cache_service.invalidate_container_cache(container)
+        return {"status": "success", "message": f"Cache invalidated for {container}"}
+    except Exception as e:
+        logger.error(f"Error invalidating cache for {container}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 

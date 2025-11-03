@@ -22,7 +22,7 @@ class CosmosService {
     
     this.client = new CosmosClient({
       endpoint,
-      aadCredential: credential
+      aadCredentials: credential
     });
     
     this.database = "sports";
