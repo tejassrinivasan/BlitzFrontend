@@ -113,12 +113,29 @@ async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List
         logger.error(f"Error generating embedding: {e}")
         return None
 
+def get_cosmos_client():
+    """Get a Cosmos DB client with proper authentication."""
+    # Try connection string first, then key authentication, then DefaultAzureCredential
+    cosmos_connection_string = os.getenv("COSMOS_CONNECTION_STRING")
+    cosmos_key = os.getenv("COSMOS_DB_KEY") or os.getenv("COSMOS_KEY") or os.getenv("AZURE_COSMOS_KEY")
+    cosmos_endpoint = os.getenv("COSMOS_DB_ENDPOINT") or COSMOSDB_ENDPOINT
+    
+    if cosmos_connection_string:
+        logger.info("Using Cosmos DB connection string")
+        return CosmosClient.from_connection_string(cosmos_connection_string)
+    elif cosmos_key:
+        logger.info("Using Cosmos DB key authentication")
+        return CosmosClient(cosmos_endpoint, credential=cosmos_key)
+    else:
+        logger.info("Using DefaultAzureCredential")
+        credential = DefaultAzureCredential()
+        return CosmosClient(cosmos_endpoint, credential=credential)
+
 def get_container_client(container_name: str):
     """Get a container client with error handling."""
     validate_container_name(container_name)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        cosmos_client = get_cosmos_client()
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container_name)
         # Test if container exists
@@ -198,8 +215,7 @@ async def search_documents(
             logger.info(f"Retrieved search results from cache for '{q}' in {field}")
             return cached_data
 
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        cosmos_client = get_cosmos_client()
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
 
@@ -275,8 +291,7 @@ async def create_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        cosmos_client = get_cosmos_client()
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
         
@@ -320,8 +335,7 @@ async def update_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        cosmos_client = get_cosmos_client()
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
         
@@ -363,8 +377,7 @@ async def delete_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
+        cosmos_client = get_cosmos_client()
         database = cosmos_client.get_database_client(DATABASE_NAME)
         container_client = database.get_container_client(container)
         
