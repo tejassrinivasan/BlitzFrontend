@@ -1,25 +1,8 @@
 import axios from 'axios';
 import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
-// Use environment-specific API URLs
-const getBaseURL = () => {
-  // Check if we're running on localhost (development)
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
-    
-    // In development, use the Vite proxy
-    if (isLocalhost) {
-      return '/api';
-    }
-  }
-  
-  // In production (including Amplify), always use the Render backend
-  return 'https://blitzfrontend.onrender.com/api';
-};
-
 const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: 'https://blitzfrontend.onrender.com/api',
   headers: {
     'Content-Type': 'application/json',
   },
