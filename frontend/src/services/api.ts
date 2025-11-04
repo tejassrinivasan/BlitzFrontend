@@ -3,15 +3,18 @@ import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRe
 
 // Use environment-specific API URLs
 const getBaseURL = () => {
-  // Check if we're in development mode by looking for localhost
-  const isDevelopment = typeof window !== 'undefined' && 
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  
-  // In development, use the Vite proxy
-  if (isDevelopment) {
-    return '/api';
+  // Check if we're running on localhost (development)
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
+    
+    // In development, use the Vite proxy
+    if (isLocalhost) {
+      return '/api';
+    }
   }
-  // In production, use the deployed backend
+  
+  // In production (including Amplify), always use the Render backend
   return 'https://blitzfrontend.onrender.com/api';
 };
 
