@@ -225,34 +225,9 @@ function FeedbackDocuments() {
     try {
       setLoadingAllDocuments(true);
       
-      // Check if we already have all documents in cache
-      const cachedDocs = documentCache[selectedContainer];
-      if (cachedDocs && cachedDocs.length > 50) { // Assume cache is reasonably complete if > 50 docs
-        setDocuments(cachedDocs);
-        setHasMore(false);
-        setShowAllMode(true);
-        
-        toast({
-          title: 'All documents loaded from cache',
-          description: `${cachedDocs.length} documents`,
-          status: 'success',
-          duration: 2000,
-          isClosable: true,
-        });
-        
-        setLoadingAllDocuments(false);
-        return;
-      }
-      
-      // Use the optimized /all endpoint for better performance
-      const endpoint = `/api/feedback/documents/all?container=${selectedContainer}`;
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch all documents');
-      }
-
-      const allDocs = await response.json();
+      // Always fetch ALL documents from the database - no cache assumptions
+      console.log(`Fetching ALL documents for container: ${selectedContainer}`);
+      const allDocs = await getAllFeedbackDocuments(selectedContainer);
       
       setDocuments(allDocs);
       setHasMore(false);
@@ -266,12 +241,15 @@ function FeedbackDocuments() {
       
       toast({
         title: 'All documents loaded',
-        description: `Loaded ${allDocs.length} documents`,
+        description: `Loaded ${allDocs.length} total documents from database`,
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
+      
+      console.log(`Successfully loaded ${allDocs.length} documents for ${selectedContainer}`);
     } catch (error) {
+      console.error('Error loading all documents:', error);
       toast({
         title: 'Error',
         description: 'Failed to load all documents',
