@@ -3,12 +3,16 @@ import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRe
 
 // Use environment-specific API URLs
 const getBaseURL = () => {
+  // Check if we're in development mode by looking for localhost
+  const isDevelopment = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  
   // In development, use the Vite proxy
-  if (import.meta.env.DEV) {
+  if (isDevelopment) {
     return '/api';
   }
-  // In production, use environment variable or fallback to hardcoded URL
-  return import.meta.env.VITE_API_URL || 'https://blitzfrontend.onrender.com/api';
+  // In production, use the deployed backend
+  return 'https://blitzfrontend.onrender.com/api';
 };
 
 const api = axios.create({
