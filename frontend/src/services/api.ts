@@ -7,8 +7,8 @@ const getBaseURL = () => {
   if (import.meta.env.DEV) {
     return '/api';
   }
-  // In production, use the deployed backend
-  return 'https://blitzfrontend.onrender.com/api';
+  // In production, use environment variable or fallback to hardcoded URL
+  return import.meta.env.VITE_API_URL || 'https://blitzfrontend.onrender.com/api';
 };
 
 const api = axios.create({
