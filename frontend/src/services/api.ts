@@ -1,11 +1,20 @@
 import axios from 'axios';
 import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
+const API_BASE_URL = 'https://blitzfrontend.onrender.com/api';
+console.log('🚀 API Base URL:', API_BASE_URL);
+
 const api = axios.create({
-  baseURL: 'https://blitzfrontend.onrender.com/api',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Debug logging for all requests
+api.interceptors.request.use(request => {
+  console.log('🌐 Making API request to:', request.baseURL + request.url);
+  return request;
 });
 
 export const generateInsights = async (request: GenerateInsightsRequest): Promise<ApiResponse> => {
