@@ -13,7 +13,7 @@ const api = axios.create({
 
 // Debug logging for all requests
 api.interceptors.request.use(request => {
-  console.log('🌐 Making API request to:', request.baseURL + request.url);
+  console.log('🌐 Making API request to:', (request.baseURL || '') + (request.url || ''));
   return request;
 });
 
