@@ -67,7 +67,11 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend dev server
+    allow_origins=[
+        "http://localhost:5173",  # Frontend dev server
+        "http://localhost:5174",  # Alternative dev server port
+        "https://main.d12z6l6ulzfbg.amplifyapp.com",  # Production frontend on Amplify
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,8 +1,18 @@
 import axios from 'axios';
 import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
+// Use environment-specific API URLs
+const getBaseURL = () => {
+  // In development, use the Vite proxy
+  if (import.meta.env.DEV) {
+    return '/api';
+  }
+  // In production, use the deployed backend
+  return 'https://blitzfrontend.onrender.com/api';
+};
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getBaseURL(),
   headers: {
     'Content-Type': 'application/json',
   },
