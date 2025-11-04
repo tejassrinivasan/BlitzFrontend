@@ -47,7 +47,16 @@ import {
 import { SearchIcon, EditIcon, DeleteIcon, ArrowUpIcon, RepeatIcon, ChevronRightIcon, ArrowBackIcon } from '@chakra-ui/icons';
 import debounce from 'lodash/debounce';
 import { FeedbackDocument } from '../server/services/cosmosService';
-import { executeQuery } from '../services/api';
+import { 
+  executeQuery, 
+  getFeedbackContainers, 
+  getAllFeedbackDocuments, 
+  getFeedbackDocuments, 
+  searchFeedbackDocuments,
+  createFeedbackDocument,
+  updateFeedbackDocument,
+  deleteFeedbackDocument
+} from '../services/api';
 import type { QueryResult } from '../types/api';
 
 type ContainerType = 
@@ -126,11 +135,7 @@ function FeedbackDocuments() {
 
   const loadContainers = async () => {
     try {
-      const response = await fetch('/api/feedback/containers');
-      if (!response.ok) {
-        throw new Error('Failed to load containers');
-      }
-      const data = await response.json();
+      const data = await getFeedbackContainers();
       setContainers(data.containers);
     } catch (error) {
       console.error('Error loading containers:', error);
@@ -170,17 +175,9 @@ function FeedbackDocuments() {
         return;
       }
       
-      const endpoint = search
-        ? `/api/feedback/documents/search?q=${encodeURIComponent(search)}&container=${selectedContainer}`
-        : `/api/feedback/documents?page=${pageNum}&container=${selectedContainer}`;
-      
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch documents');
-      }
-
-      const data = await response.json();
+      const data = search
+        ? await searchFeedbackDocuments(search, selectedContainer)
+        : await getFeedbackDocuments(pageNum, selectedContainer);
       
       if (pageNum === 1) {
         setDocuments(data);
@@ -296,12 +293,7 @@ function FeedbackDocuments() {
     setPreloadingContainers(prev => new Set([...prev, container]));
     
     try {
-      const response = await fetch(`/api/feedback/documents/all?container=${container}`);
-      if (!response.ok) {
-        throw new Error('Failed to preload documents');
-      }
-      
-      const allDocs = await response.json();
+      const allDocs = await getAllFeedbackDocuments(container);
       
       setDocumentCache(prev => ({
         ...prev,
@@ -419,22 +411,10 @@ function FeedbackDocuments() {
 
   const handleCreate = async () => {
     try {
-      const response = await fetch(`/api/feedback/documents?container=${selectedContainer}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          UserPrompt: '',
-          Query: ''
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create document');
-      }
-
-      const newDoc = await response.json();
+      const newDoc = await createFeedbackDocument({
+        UserPrompt: '',
+        Query: ''
+      }, selectedContainer);
       setDocuments(prev => [newDoc, ...prev]);
       setEditingDoc(newDoc);
       
@@ -466,19 +446,7 @@ function FeedbackDocuments() {
     if (!editingDoc?.id) return;
     
     try {
-      const response = await fetch(`/api/feedback/documents/${editingDoc.id}?container=${selectedContainer}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(editingDoc)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save document');
-      }
-
-      const savedDoc = await response.json();
+      const savedDoc = await updateFeedbackDocument(editingDoc.id, editingDoc, selectedContainer);
       setDocuments(docs => docs.map(doc => 
         doc.id === savedDoc.id ? savedDoc : doc
       ));
@@ -514,13 +482,7 @@ function FeedbackDocuments() {
     }
 
     try {
-      const response = await fetch(`/api/feedback/documents/${docId}?container=${selectedContainer}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete document');
-      }
+      await deleteFeedbackDocument(docId, selectedContainer);
 
       setDocuments(docs => docs.filter(doc => doc.id !== docId));
       if (editingDoc?.id === docId) {
@@ -670,14 +632,8 @@ function FeedbackDocuments() {
 
       // Update each document
       await Promise.all(
-        updates.map(doc =>
-          fetch(`/api/feedback/documents/${doc.id}?container=${selectedContainer}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(doc)
-          })
+        updates.filter(doc => doc.id).map(doc =>
+          updateFeedbackDocument(doc.id!, doc, selectedContainer)
         )
       );
 

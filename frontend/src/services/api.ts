@@ -54,6 +54,37 @@ export const getFeedbackContainers = async (): Promise<ContainersResponse> => {
   return response.data;
 };
 
+// Feedback Documents API
+export const getFeedbackDocuments = async (page: number = 1, container: string = 'nba-official') => {
+  const response = await api.get(`/feedback/documents?page=${page}&container=${container}`);
+  return response.data;
+};
+
+export const getAllFeedbackDocuments = async (container: string) => {
+  const response = await api.get(`/feedback/documents/all?container=${container}`);
+  return response.data;
+};
+
+export const searchFeedbackDocuments = async (query: string, container: string, field: string = 'UserPrompt') => {
+  const response = await api.get(`/feedback/documents/search?q=${encodeURIComponent(query)}&container=${container}&field=${field}`);
+  return response.data;
+};
+
+export const createFeedbackDocument = async (document: any, container: string) => {
+  const response = await api.post(`/feedback/documents?container=${container}`, document);
+  return response.data;
+};
+
+export const updateFeedbackDocument = async (docId: string, document: any, container: string) => {
+  const response = await api.put(`/feedback/documents/${docId}?container=${container}`, document);
+  return response.data;
+};
+
+export const deleteFeedbackDocument = async (docId: string, container: string) => {
+  const response = await api.delete(`/feedback/documents/${docId}?container=${container}`);
+  return response.data;
+};
+
 // Container definitions for UI
 export const containers: { id: ContainerType; name: string; description: string }[] = [
   { id: 'mlb', name: 'MLB Official', description: 'Official MLB feedback documents' },
