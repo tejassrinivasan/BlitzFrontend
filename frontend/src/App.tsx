@@ -329,9 +329,10 @@ function SQLQueryRunner() {
                     {queryResult.success ? 'Success' : 'Error'}
                   </Badge>
                   {queryResult.success && (
-                                         <Text fontSize="sm" color="gray.600">
-                       {queryResult.row_count} rows • Database: {queryResult.database?.toUpperCase()} Database
-                     </Text>
+                    <Text fontSize="sm" color="gray.600">
+                      {queryResult.row_count} rows • Database: {queryResult.database?.toUpperCase()} Database
+                      {queryResult.row_count > 250 && " • Displaying first 250 rows"}
+                    </Text>
                   )}
                 </HStack>
 
@@ -353,7 +354,7 @@ function SQLQueryRunner() {
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {queryResult.data.slice(0, 1000).map((row, index) => (
+                        {queryResult.data.slice(0, 250).map((row, index) => (
                           <Tr key={index}>
                             {queryResult.columns?.map((column) => (
                               <Td key={column} fontSize="sm">
@@ -378,6 +379,13 @@ function SQLQueryRunner() {
                   <Alert status="info">
                     <AlertIcon />
                     {queryResult.message}
+                  </Alert>
+                )}
+
+                {queryResult.warning && (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    {queryResult.warning}
                   </Alert>
                 )}
               </VStack>

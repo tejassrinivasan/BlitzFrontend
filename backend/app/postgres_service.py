@@ -55,15 +55,23 @@ class PostgresService:
         return value
     
     def _initialize_engines(self):
-        """Initialize SQLAlchemy engines for each database."""
+        """Initialize SQLAlchemy engines for each database with memory-efficient settings."""
         for db_name, config in AVAILABLE_DATABASES.items():
             try:
                 connection_string = (
                     f"postgresql://{config['user']}:{config['password']}@"
                     f"{config['host']}:{config['port']}/{config['database']}"
                 )
-                self.engines[db_name] = create_engine(connection_string, pool_pre_ping=True)
-                logger.info(f"Initialized engine for database: {db_name}")
+                # Memory-efficient connection pool settings
+                self.engines[db_name] = create_engine(
+                    connection_string, 
+                    pool_pre_ping=True,
+                    pool_size=2,  # Limit connection pool size
+                    max_overflow=3,  # Limit overflow connections
+                    pool_recycle=3600,  # Recycle connections after 1 hour
+                    pool_timeout=30  # Timeout for getting connection
+                )
+                logger.info(f"Initialized memory-efficient engine for database: {db_name}")
             except Exception as e:
                 logger.error(f"Failed to initialize engine for {db_name}: {e}")
     
@@ -75,8 +83,8 @@ class PostgresService:
         """Validate if the database is available."""
         return database in AVAILABLE_DATABASES
     
-    def execute_query(self, database: str, query: str) -> Dict[str, Any]:
-        """Execute a SQL query against the specified database."""
+    def execute_query(self, database: str, query: str, max_rows: int = 10000) -> Dict[str, Any]:
+        """Execute a SQL query against the specified database with memory-safe limits."""
         if not self.validate_database(database):
             raise ValueError(f"Invalid database: {database}")
         
@@ -89,10 +97,21 @@ class PostgresService:
                 # Execute the query
                 result = connection.execute(text(query))
                 
-                # Fetch all results
+                # Fetch results with memory-safe limits
                 if result.returns_rows:
                     columns = list(result.keys())
-                    rows = result.fetchall()
+                    
+                    # Fetch rows with limit to prevent memory issues
+                    rows = result.fetchmany(max_rows)
+                    total_fetched = len(rows)
+                    
+                    # Check if there are more rows
+                    has_more = False
+                    if total_fetched == max_rows:
+                        # Try to fetch one more to see if there are additional rows
+                        additional_rows = result.fetchmany(1)
+                        if additional_rows:
+                            has_more = True
                     
                     # Convert rows to list of dictionaries
                     data = []
@@ -102,7 +121,7 @@ class PostgresService:
                             row_dict[column] = self._convert_value(row[i])
                         data.append(row_dict)
                     
-                    return {
+                    response = {
                         "success": True,
                         "data": data,
                         "columns": columns,
@@ -110,6 +129,12 @@ class PostgresService:
                         "query": query,
                         "database": database
                     }
+                    
+                    if has_more:
+                        response["warning"] = f"Result set limited to {max_rows} rows for memory safety. Use LIMIT in your query for better control."
+                        response["truncated"] = True
+                    
+                    return response
                 else:
                     # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
                     return {

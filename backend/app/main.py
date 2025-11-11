@@ -62,7 +62,11 @@ def validate_container_name(container_name: str) -> None:
 # Initialize Redis client if REDIS_URL is set
 redis_client = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 
-app = FastAPI()
+app = FastAPI(
+    title="Blitz Sports API",
+    description="Memory-optimized sports data API",
+    version="1.0.0"
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -77,29 +81,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add request size limiting middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
+import asyncio
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_size: int = 10 * 1024 * 1024):  # 10MB limit
+        super().__init__(app)
+        self.max_size = max_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.headers.get("content-length"):
+            content_length = int(request.headers["content-length"])
+            if content_length > self.max_size:
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": "Request too large", "max_size_mb": self.max_size // (1024 * 1024)}
+                )
+        return await call_next(request)
+
+app.add_middleware(RequestSizeLimitMiddleware, max_size=10 * 1024 * 1024)  # 10MB limit
+
 @app.on_event("startup")
 async def startup_event():
-    """Warm cache on startup for better initial performance."""
+    """Initialize application without memory-intensive operations."""
+    logger.info("Application startup - memory-optimized mode")
     if cache_service.cache_enabled:
-        logger.info("Starting cache warming on server startup...")
-        try:
-            # Warm cache for NBA Official (the default container)
-            container_client = get_container_client(NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME)
-            query = "SELECT * FROM c ORDER BY c._ts DESC"
-            
-            items = list(container_client.query_items(
-                query=query,
-                parameters=[],
-                enable_cross_partition_query=True
-            ))
-            
-            cache_service.warm_cache_for_container(NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME, items)
-            logger.info(f"Startup cache warming completed for {NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME}: {len(items)} documents")
-            
-        except Exception as e:
-            logger.warning(f"Startup cache warming failed: {e}")
+        logger.info("Cache service ready - warming will happen on-demand")
     else:
-        logger.info("Cache warming skipped - Redis not configured")
+        logger.info("Cache service disabled - Redis not configured")
 
 async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List[float]:
     """Generate embeddings for a given text using Azure OpenAI."""
@@ -245,39 +257,50 @@ async def search_documents(
 
 @app.get("/api/feedback/documents/all", response_model=List[FeedbackDocument])
 async def get_all_documents(
-    container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to fetch all documents from")
+    container: str = Query(OFFICIAL_DOCUMENTS_CONTAINER_NAME, description="Container name to fetch all documents from"),
+    limit: int = Query(1000, description="Maximum number of documents to return (default: 1000, max: 5000)")
 ):
-    """Get all documents from a container without pagination."""
+    """Get documents from a container with memory-safe limits."""
     validate_container_name(container)
+    
+    # Enforce maximum limit to prevent memory issues
+    if limit > 5000:
+        limit = 5000
+        logger.warning(f"Limit reduced to 5000 to prevent memory issues")
+    
     try:
-        logger.info(f"Attempting to fetch all documents from container: {container}")
+        logger.info(f"Attempting to fetch up to {limit} documents from container: {container}")
         start_time = time.time()
 
-        # Try to get from enhanced cache first
-        cached_data = cache_service.get_all_cache(container)
-        if cached_data:
-            logger.info(f"Retrieved all documents from cache for {container}")
-            return cached_data
+        # Try to get from enhanced cache first (only if reasonable limit)
+        if limit <= 1000:
+            cached_data = cache_service.get_all_cache(container)
+            if cached_data:
+                logger.info(f"Retrieved documents from cache for {container}")
+                return cached_data[:limit]  # Return only requested amount
 
         container_client = get_container_client(container)
         
         query = """
             SELECT * FROM c 
             ORDER BY c._ts DESC
+            OFFSET 0 LIMIT @limit
         """
+        parameters = [{"name": "@limit", "value": limit}]
         
         items = list(container_client.query_items(
             query=query,
-            parameters=[],
+            parameters=parameters,
             enable_cross_partition_query=True
         ))
 
-        # Cache the results using enhanced cache service
-        cache_service.set_all_cache(container, items)
+        # Only cache if result is reasonable size
+        if len(items) <= 1000:
+            cache_service.set_all_cache(container, items)
         
         end_time = time.time()
-        logger.info(f"All documents fetch completed in {end_time - start_time:.2f} seconds")
-        logger.info(f"Retrieved {len(items)} documents from {container}")
+        logger.info(f"Limited documents fetch completed in {end_time - start_time:.2f} seconds")
+        logger.info(f"Retrieved {len(items)} documents from {container} (limit: {limit})")
         
         return items
     except Exception as e:
@@ -546,24 +569,34 @@ async def get_database_tables(database: str):
 # Cache Management Endpoints
 
 @app.post("/api/feedback/cache/warm/{container}")
-async def warm_cache(container: str):
-    """Warm cache for a specific container."""
+async def warm_cache(
+    container: str,
+    limit: int = Query(1000, description="Maximum number of documents to cache (default: 1000, max: 2000)")
+):
+    """Warm cache for a specific container with memory-safe limits."""
     validate_container_name(container)
+    
+    # Enforce maximum limit to prevent memory issues
+    if limit > 2000:
+        limit = 2000
+        logger.warning(f"Cache warming limit reduced to 2000 to prevent memory issues")
+    
     try:
-        logger.info(f"Warming cache for container: {container}")
+        logger.info(f"Warming cache for container: {container} (limit: {limit})")
         start_time = time.time()
         
-        # Fetch all documents to warm the cache
+        # Fetch limited documents to warm the cache
         container_client = get_container_client(container)
-        query = "SELECT * FROM c ORDER BY c._ts DESC"
+        query = "SELECT * FROM c ORDER BY c._ts DESC OFFSET 0 LIMIT @limit"
+        parameters = [{"name": "@limit", "value": limit}]
         
         items = list(container_client.query_items(
             query=query,
-            parameters=[],
+            parameters=parameters,
             enable_cross_partition_query=True
         ))
         
-        # Warm the cache with all documents and paginated results
+        # Warm the cache with limited documents and paginated results
         cache_service.warm_cache_for_container(container, items)
         
         end_time = time.time()
@@ -571,8 +604,9 @@ async def warm_cache(container: str):
         
         return {
             "status": "success",
-            "message": f"Cache warmed for {container}",
+            "message": f"Cache warmed for {container} (limited to {limit} documents)",
             "document_count": len(items),
+            "limit_applied": limit,
             "duration_seconds": round(end_time - start_time, 2)
         }
     except Exception as e:
@@ -598,4 +632,48 @@ async def invalidate_cache(container: str):
         return {"status": "success", "message": f"Cache invalidated for {container}"}
     except Exception as e:
         logger.error(f"Error invalidating cache for {container}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Health and monitoring endpoints
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint with basic memory monitoring."""
+    import psutil
+    import os
+    
+    try:
+        # Get current process info
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        memory_mb = memory_info.rss / 1024 / 1024  # Convert to MB
+        
+        # Check if we're approaching memory limits (warn at 400MB, critical at 480MB)
+        memory_status = "healthy"
+        if memory_mb > 480:
+            memory_status = "critical"
+        elif memory_mb > 400:
+            memory_status = "warning"
+        
+        return {
+            "status": "healthy",
+            "memory": {
+                "used_mb": round(memory_mb, 2),
+                "status": memory_status,
+                "limit_mb": 512
+            },
+            "cache": {
+                "enabled": cache_service.cache_enabled,
+                "stats": cache_service.get_cache_stats() if cache_service.cache_enabled else None
+            },
+            "databases": {
+                "available": postgres_service.get_available_databases(),
+                "engines_initialized": len(postgres_service.engines)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        } 

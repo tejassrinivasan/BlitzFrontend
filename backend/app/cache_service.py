@@ -158,27 +158,33 @@ class CacheService:
             logger.error(f"Error invalidating all cache: {e}")
     
     def warm_cache_for_container(self, container: str, documents: List[Dict]) -> None:
-        """Warm cache for a container with all documents and first few pages."""
+        """Warm cache for a container with memory-safe limits."""
         if not self.cache_enabled or not documents:
             return
         
         try:
-            # Cache all documents
-            self.set_all_cache(container, documents)
+            # Only cache if reasonable size to prevent memory issues
+            max_cache_size = 1000
+            documents_to_cache = documents[:max_cache_size] if len(documents) > max_cache_size else documents
             
-            # Cache first few pages
+            # Cache limited documents only if size is reasonable
+            if len(documents_to_cache) <= max_cache_size:
+                self.set_all_cache(container, documents_to_cache)
+            
+            # Cache first few pages with smaller page size
             page_size = 20
-            total_pages = min(5, (len(documents) + page_size - 1) // page_size)  # Cache first 5 pages
+            total_pages = min(3, (len(documents_to_cache) + page_size - 1) // page_size)  # Cache first 3 pages only
             
             for page in range(1, total_pages + 1):
                 start_idx = (page - 1) * page_size
                 end_idx = start_idx + page_size
-                page_data = documents[start_idx:end_idx]
+                page_data = documents_to_cache[start_idx:end_idx]
                 
                 if page_data:
                     self.set_page_cache(container, page, page_data, page_size)
             
-            logger.info(f"Cache warmed for {container}: all docs + {total_pages} pages")
+            cached_count = len(documents_to_cache)
+            logger.info(f"Cache warmed for {container}: {cached_count} docs + {total_pages} pages (memory-safe)")
             
         except Exception as e:
             logger.error(f"Error warming cache for {container}: {e}")

@@ -37,6 +37,7 @@ export interface QueryResult {
   database?: string;
   error?: string;
   message?: string;
+  warning?: string;
 }
 
 export interface DatabaseInfo {
