@@ -331,7 +331,7 @@ function SQLQueryRunner() {
                   {queryResult.success && (
                     <Text fontSize="sm" color="gray.600">
                       {queryResult.row_count} rows • Database: {queryResult.database?.toUpperCase()} Database
-                      {queryResult.row_count > 250 && " • Displaying first 250 rows"}
+                      {queryResult.row_count !== undefined && queryResult.row_count > 250 && " • Displaying first 250 rows"}
                     </Text>
                   )}
                 </HStack>
