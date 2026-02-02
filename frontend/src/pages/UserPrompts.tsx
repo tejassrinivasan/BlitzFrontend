@@ -46,7 +46,7 @@ interface UserPrompt {
 function UserPrompts() {
   const [userPrompts, setUserPrompts] = useState<UserPrompt[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedContainers, setSelectedContainers] = useState<ContainerType[]>(['mlb']);
+  const [selectedContainers, setSelectedContainers] = useState<ContainerType[]>(['mlb-official']);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyText, setCopyText] = useState('');
   const toast = useToast();
