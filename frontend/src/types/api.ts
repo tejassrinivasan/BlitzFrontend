@@ -54,7 +54,7 @@ export interface ContainersResponse {
 }
 
 export type ContainerType =
-  | 'mlb'
+  | 'mlb-official'
   | 'mlb-partner-feedback-helpful'
   | 'mlb-partner-feedback-unhelpful'
   | 'mlb-user-feedback'

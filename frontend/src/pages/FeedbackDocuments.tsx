@@ -60,7 +60,7 @@ import {
 import type { QueryResult } from '../types/api';
 
 type ContainerType = 
-  | 'mlb'
+  | 'mlb-official'
   | 'mlb-unofficial'
   | 'nba-official'
   | 'nba-unofficial';
@@ -141,7 +141,7 @@ function FeedbackDocuments() {
       console.error('Error loading containers:', error);
       // Fallback to default containers
       setContainers([
-        { value: 'mlb', label: 'MLB Official' },
+        { value: 'mlb-official', label: 'MLB Official' },
         { value: 'mlb-unofficial', label: 'MLB Unofficial' },
         { value: 'nba-official', label: 'NBA Official' },
         { value: 'nba-unofficial', label: 'NBA Unofficial' }
@@ -376,7 +376,7 @@ function FeedbackDocuments() {
     fetchDocuments(1);
     
     // Preload other containers in the background for faster switching
-    const otherContainers: ContainerType[] = ['nba-official', 'nba-unofficial', 'mlb', 'mlb-unofficial'];
+    const otherContainers: ContainerType[] = ['nba-official', 'nba-unofficial', 'mlb-official', 'mlb-unofficial'];
     const containersToPreload = otherContainers.filter(c => c !== selectedContainer);
     
     // Staggered preloading to avoid overwhelming the server
@@ -496,11 +496,11 @@ function FeedbackDocuments() {
     const getTargetContainer = (sourceContainer: string): string => {
       switch (sourceContainer) {
         case 'mlb-unofficial':
-          return 'mlb';
+          return 'mlb-official';
         case 'nba-unofficial':
           return 'nba-official';
         default:
-          return 'mlb'; // Fallback
+          return 'mlb-official'; // Fallback
       }
     };
 
@@ -528,7 +528,7 @@ function FeedbackDocuments() {
         return updated;
       });
       
-      const targetLabel = targetContainer === 'mlb' ? 'MLB Official' : 'NBA Official';
+      const targetLabel = targetContainer === 'mlb-official' ? 'MLB Official' : 'NBA Official';
       
       toast({
         title: 'Document transferred',
@@ -697,7 +697,7 @@ function FeedbackDocuments() {
 
   // Helper function to get default database based on container
   const getDefaultDatabase = () => {
-    return selectedContainer === 'nba-official' || selectedContainer === 'nba-unofficial' ? 'nba' : 'mlb';
+    return selectedContainer === 'nba-official' || selectedContainer === 'nba-unofficial' ? 'nba' : 'mlbfinal';
   };
 
   const handleRunQuery = async (docId: string, query: string) => {

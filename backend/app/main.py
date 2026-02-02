@@ -26,6 +26,7 @@ from .config import (
     NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
     MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     CONTAINER_DISPLAY_NAMES,
     OPENAI_ENDPOINT,
     OPENAI_API_VERSION,
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_CONTAINERS = {
     OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
     # Keep legacy containers for backwards compatibility
@@ -450,7 +452,7 @@ async def transfer_document(
         doc["id"] = str(uuid4())
         
         # If transferring to official container, generate embeddings
-        is_official_target = target_container in ["mlb", "nba-official"]
+        is_official_target = target_container in ["mlb-official", "nba-official"]
         if is_official_target:
             openai_client = AsyncAzureOpenAI(
                 azure_endpoint=OPENAI_ENDPOINT,
@@ -491,7 +493,7 @@ async def get_feedback_containers():
     """Get list of available feedback containers with display names."""
     return {
         "containers": [
-            {"value": "mlb", "label": "MLB Official"},
+            {"value": "mlb-official", "label": "MLB Official"},
             {"value": "mlb-unofficial", "label": "MLB Unofficial"},
             {"value": "nba-official", "label": "NBA Official"},
             {"value": "nba-unofficial", "label": "NBA Unofficial"}

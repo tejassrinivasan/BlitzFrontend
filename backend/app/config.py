@@ -28,7 +28,7 @@ MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-unofficial"
 
 # Container display mapping for UI
 CONTAINER_DISPLAY_NAMES = {
-    "mlb": "MLB Official",
+    "mlb-official": "MLB Official",
     "mlb-unofficial": "MLB Unofficial", 
     "nba-official": "NBA Official",
     "nba-unofficial": "NBA Unofficial"

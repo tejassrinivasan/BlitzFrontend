@@ -87,7 +87,7 @@ export const deleteFeedbackDocument = async (docId: string, container: string) =
 
 // Container definitions for UI
 export const containers: { id: ContainerType; name: string; description: string }[] = [
-  { id: 'mlb', name: 'MLB Official', description: 'Official MLB feedback documents' },
+  { id: 'mlb-official', name: 'MLB Official', description: 'Official MLB feedback documents' },
   { id: 'mlb-partner-feedback-helpful', name: 'MLB Partner Feedback (Helpful)', description: 'Helpful partner feedback documents' },
   { id: 'mlb-partner-feedback-unhelpful', name: 'MLB Partner Feedback (Unhelpful)', description: 'Unhelpful partner feedback documents' },
   { id: 'mlb-user-feedback', name: 'MLB User Feedback', description: 'User feedback documents' },
