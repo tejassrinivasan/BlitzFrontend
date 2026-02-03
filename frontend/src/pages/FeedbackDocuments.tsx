@@ -1160,6 +1160,7 @@ function FeedbackDocuments() {
                             width="140px"
                           >
                             <option value="mlb">MLB Database</option>
+                            <option value="mlbfinal">MLB Final Database</option>
                             <option value="nba">NBA Database</option>
                           </Select>
                           <Button

@@ -26,6 +26,9 @@ NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-official"
 NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-unofficial"
 MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-unofficial"
 
+# MLB Official Container (uses mlbfinal database schema)
+MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-official"
+
 # Container display mapping for UI
 CONTAINER_DISPLAY_NAMES = {
     "mlb-official": "MLB Official",
@@ -46,6 +49,13 @@ AVAILABLE_DATABASES = {
         "host": POSTGRES_HOST,
         "port": POSTGRES_PORT,
         "database": "mlb",
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD
+    },
+    "mlbfinal": {
+        "host": POSTGRES_HOST,
+        "port": POSTGRES_PORT,
+        "database": "mlbfinal",
         "user": POSTGRES_USER,
         "password": POSTGRES_PASSWORD
     },
