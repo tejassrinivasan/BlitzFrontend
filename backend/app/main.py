@@ -22,6 +22,7 @@ from .config import (
     MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     MLB_OFFICIAL_COSMOS_CONTAINER_ID,
     CONTAINER_DISPLAY_NAMES,
+    AZURE_OPENAI_EMBEDDINGS_ENABLED,
     OPENAI_ENDPOINT,
     OPENAI_API_VERSION,
     OPENAI_DEPLOYMENT,
@@ -114,6 +115,13 @@ app.middleware("http")(log_requests_middleware)
 async def startup_event():
     """Initialize application without memory-intensive operations."""
     log_cosmos_config_probe(context="startup")
+    logger.info(
+        "OpenAI embeddings: enabled=%s endpoint=%s deployment=%s api_version=%s",
+        AZURE_OPENAI_EMBEDDINGS_ENABLED,
+        OPENAI_ENDPOINT,
+        OPENAI_DEPLOYMENT,
+        OPENAI_API_VERSION,
+    )
     logger.info("Application startup - memory-optimized mode")
     if cache_service.cache_enabled:
         logger.info("Cache service ready - warming will happen on-demand")
@@ -128,8 +136,15 @@ OFFICIAL_EMBEDDING_CONTAINERS = {
 
 
 async def _maybe_add_embeddings(container: str, doc_dict: dict) -> None:
-    """Add embedding vectors for official containers when OpenAI is configured."""
+    """Add embedding vectors for official containers when OpenAI is enabled and reachable."""
     if container not in OFFICIAL_EMBEDDING_CONTAINERS:
+        return
+
+    if not AZURE_OPENAI_EMBEDDINGS_ENABLED:
+        logger.info(
+            "Skipping embeddings for container=%s (AZURE_OPENAI_EMBEDDINGS_ENABLED is false)",
+            container,
+        )
         return
 
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -147,22 +162,24 @@ async def _maybe_add_embeddings(container: str, doc_dict: dict) -> None:
     )
     if doc_dict.get("UserPrompt"):
         user_prompt_vec = await get_embedding(
-            openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002"
+            openai_client, doc_dict["UserPrompt"], OPENAI_DEPLOYMENT
         )
         if user_prompt_vec is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.",
+            logger.warning(
+                "UserPrompt embedding failed for container=%s — saving without UserPromptVector",
+                container,
             )
-        doc_dict["UserPromptVector"] = user_prompt_vec
+        else:
+            doc_dict["UserPromptVector"] = user_prompt_vec
     if doc_dict.get("Query"):
-        query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
+        query_vec = await get_embedding(openai_client, doc_dict["Query"], OPENAI_DEPLOYMENT)
         if query_vec is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.",
+            logger.warning(
+                "Query embedding failed for container=%s — saving without QueryVector",
+                container,
             )
-        doc_dict["QueryVector"] = query_vec
+        else:
+            doc_dict["QueryVector"] = query_vec
 
 
 async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List[float]:
@@ -174,7 +191,12 @@ async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List
         )
         return response.data[0].embedding
     except Exception as e:
-        logger.error(f"Error generating embedding: {e}")
+        logger.error(
+            "Error generating embedding (endpoint=%s deployment=%s): %s",
+            OPENAI_ENDPOINT,
+            model,
+            e,
+        )
         return None
 
 def resolve_cosmos_container_id(container_name: str) -> str:

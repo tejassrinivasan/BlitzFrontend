@@ -4,17 +4,18 @@
 
 Add these environment variables to your Render.com (or other hosting service) deployment:
 
-### **Azure OpenAI Configuration**
-```bash
-# Required - Your Azure OpenAI API key
-AZURE_OPENAI_API_KEY=your_azure_openai_api_key_here
+### **Azure OpenAI Configuration (embeddings for official containers)**
 
-# Optional - Override defaults if needed
-AZURE_OPENAI_ENDPOINT=https://blitzgpt.openai.azure.com/
+Embeddings are **on automatically** when `AZURE_OPENAI_API_KEY` is set. They populate `UserPromptVector` / `QueryVector` for semantic search. Document save still succeeds if OpenAI is temporarily unreachable.
+
+```bash
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key_here
+AZURE_OPENAI_ENDPOINT=https://blitz-foundry.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT=text-embedding-ada-002
 AZURE_OPENAI_API_VERSION=2024-02-01
-AZURE_OPENAI_TIMEOUT=30.0
-AZURE_OPENAI_MAX_RETRIES=3
+
+# Optional: force off even when API key is set
+# AZURE_OPENAI_EMBEDDINGS_ENABLED=false
 ```
 
 ### **Other Required Variables**

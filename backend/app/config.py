@@ -28,10 +28,6 @@ SEARCH_SERVICE_NAME = "blitz-ai-search"
 SEARCH_INDEX_NAME = "blitz-mlb-index"
 SEARCH_ENDPOINT = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
 
-OPENAI_ENDPOINT = "https://blitzgpt.openai.azure.com/"
-OPENAI_DEPLOYMENT = "text-embedding-ada-002"
-OPENAI_API_VERSION = "2025-03-01-preview"
-OPENAI_EMBEDDING_DIMENSIONS = 1536
 
 def _env_first(*names: str, default: str | None = None) -> str | None:
     """Read env var from first matching name; strip quotes from .env values."""
@@ -40,6 +36,37 @@ def _env_first(*names: str, default: str | None = None) -> str | None:
         if raw is not None and str(raw).strip() != "":
             return str(raw).strip().strip('"').strip("'")
     return default
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = _env_first(name, default="true" if default else "false")
+    return (raw or "").lower() in ("1", "true", "yes", "on")
+
+
+OPENAI_ENDPOINT = _env_first(
+    "AZURE_OPENAI_ENDPOINT",
+    default="https://blitz-foundry.openai.azure.com/",
+)
+if OPENAI_ENDPOINT and not OPENAI_ENDPOINT.endswith("/"):
+    OPENAI_ENDPOINT = f"{OPENAI_ENDPOINT}/"
+
+OPENAI_DEPLOYMENT = _env_first(
+    "AZURE_OPENAI_DEPLOYMENT",
+    default="text-embedding-ada-002",
+)
+OPENAI_API_VERSION = _env_first(
+    "AZURE_OPENAI_API_VERSION",
+    default="2024-02-01",
+)
+OPENAI_EMBEDDING_DIMENSIONS = 1536
+
+# Embeddings power semantic search on official containers. Auto-on when API key is set;
+# set AZURE_OPENAI_EMBEDDINGS_ENABLED=false to force off. Saves still succeed if OpenAI is down.
+_embeddings_flag = os.getenv("AZURE_OPENAI_EMBEDDINGS_ENABLED")
+if _embeddings_flag is not None:
+    AZURE_OPENAI_EMBEDDINGS_ENABLED = _embeddings_flag.lower() in ("1", "true", "yes", "on")
+else:
+    AZURE_OPENAI_EMBEDDINGS_ENABLED = bool(os.getenv("AZURE_OPENAI_API_KEY"))
 
 
 # Cosmos: accept COSMOSDB_* (code) and COSMOS_DB_* (legacy prod naming)
