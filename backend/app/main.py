@@ -1,7 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from azure.cosmos import CosmosClient, exceptions as cosmos_exceptions
-from azure.identity import DefaultAzureCredential
 from openai import AsyncAzureOpenAI
 from typing import List, Optional, Dict
 from uuid import uuid4
@@ -11,13 +9,8 @@ import redis
 import os
 import time
 from datetime import datetime
-from dotenv import load_dotenv
-load_dotenv()
-
 from .models import FeedbackDocument
 from .config import (
-    COSMOSDB_ENDPOINT,
-    DATABASE_NAME,
     OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME,
     UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
@@ -35,6 +28,12 @@ from .config import (
 from .postgres_service import postgres_service
 from .azure_search_service import azure_search_service
 from .cache_service import cache_service
+from .cosmos_service import (
+    cosmos_item_to_feedback,
+    create_item_logged,
+    get_container_client as _get_cosmos_container_client,
+    log_cosmos_config_probe,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +79,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Warm cache on startup for better initial performance."""
+    log_cosmos_config_probe(context="startup")
     if cache_service.cache_enabled:
         logger.info("Starting cache warming on server startup...")
         try:
@@ -101,6 +101,44 @@ async def startup_event():
     else:
         logger.info("Cache warming skipped - Redis not configured")
 
+async def _maybe_add_embeddings(container: str, doc_dict: dict) -> None:
+    """Add embedding vectors for official containers when OpenAI is configured."""
+    if container not in [OFFICIAL_DOCUMENTS_CONTAINER_NAME, NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME]:
+        return
+
+    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    if not api_key:
+        logger.info(
+            "Skipping embeddings for container=%s (AZURE_OPENAI_API_KEY not set)",
+            container,
+        )
+        return
+
+    openai_client = AsyncAzureOpenAI(
+        azure_endpoint=OPENAI_ENDPOINT,
+        api_version=OPENAI_API_VERSION,
+        api_key=api_key,
+    )
+    if doc_dict.get("UserPrompt"):
+        user_prompt_vec = await get_embedding(
+            openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002"
+        )
+        if user_prompt_vec is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.",
+            )
+        doc_dict["UserPromptVector"] = user_prompt_vec
+    if doc_dict.get("Query"):
+        query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
+        if query_vec is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.",
+            )
+        doc_dict["QueryVector"] = query_vec
+
+
 async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List[float]:
     """Generate embeddings for a given text using Azure OpenAI."""
     try:
@@ -114,25 +152,9 @@ async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List
         return None
 
 def get_container_client(container_name: str):
-    """Get a container client with error handling."""
+    """Get a container client with validation and verbose Cosmos diagnostics."""
     validate_container_name(container_name)
-    try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        database = cosmos_client.get_database_client(DATABASE_NAME)
-        container_client = database.get_container_client(container_name)
-        # Test if container exists
-        container_client.read()
-        return container_client
-    except cosmos_exceptions.CosmosResourceNotFoundError:
-        logger.error(f"Container not found: {container_name}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Container '{container_name}' not found"
-        )
-    except Exception as e:
-        logger.error(f"Error getting container client: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return _get_cosmos_container_client(container_name)
 
 @app.get("/api/feedback/documents", response_model=List[FeedbackDocument])
 async def get_documents(
@@ -198,10 +220,7 @@ async def search_documents(
             logger.info(f"Retrieved search results from cache for '{q}' in {field}")
             return cached_data
 
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        database = cosmos_client.get_database_client(DATABASE_NAME)
-        container_client = database.get_container_client(container)
+        container_client = get_container_client(container)
 
         query = f"""
             SELECT * FROM c
@@ -275,42 +294,39 @@ async def create_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        database = cosmos_client.get_database_client(DATABASE_NAME)
-        container_client = database.get_container_client(container)
-        
+        container_client = get_container_client(container)
+
         doc_dict = document.model_dump(exclude_unset=True)
         doc_dict["id"] = str(uuid4())
+        logger.info(
+            "create_document | container=%s | id=%s | UserPrompt_len=%s | Query_len=%s",
+            container,
+            doc_dict["id"],
+            len(doc_dict.get("UserPrompt") or ""),
+            len(doc_dict.get("Query") or ""),
+        )
 
-        # Generate embeddings if creating in official container
-        if container in [OFFICIAL_DOCUMENTS_CONTAINER_NAME, NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME]:
-            openai_client = AsyncAzureOpenAI(
-                azure_endpoint=OPENAI_ENDPOINT,
-                api_version=OPENAI_API_VERSION,
-                api_key=os.getenv("AZURE_OPENAI_API_KEY")
-            )
-            # Generate embeddings using text-embedding-ada-002 model
-            if doc_dict.get("UserPrompt"):
-                user_prompt_vec = await get_embedding(openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002")
-                if user_prompt_vec is None:
-                    raise HTTPException(status_code=500, detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.")
-                doc_dict["UserPromptVector"] = user_prompt_vec
-            if doc_dict.get("Query"):
-                query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
-                if query_vec is None:
-                    raise HTTPException(status_code=500, detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.")
-                doc_dict["QueryVector"] = query_vec
+        await _maybe_add_embeddings(container, doc_dict)
 
-        response = container_client.create_item(doc_dict)
-        
-        # Invalidate cache for this container since we added a new document
+        created = create_item_logged(
+            container_client, doc_dict, context=f"create_document:{container}"
+        )
+
         cache_service.invalidate_container_cache(container)
-        logger.info(f"Created document and invalidated cache for container: {container}")
-        
-        return response
+        logger.info("Created document and invalidated cache for container: %s", container)
+
+        return cosmos_item_to_feedback(created)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(
+            "create_document failed | container=%s | error_type=%s | error=%s",
+            container,
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.put("/api/feedback/documents/{doc_id}", response_model=FeedbackDocument)
 async def update_document(
@@ -320,31 +336,12 @@ async def update_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        database = cosmos_client.get_database_client(DATABASE_NAME)
-        container_client = database.get_container_client(container)
-        
+        container_client = get_container_client(container)
+
         doc_dict = document.model_dump()
         doc_dict["id"] = doc_id
 
-        # Regenerate embeddings if updating in official container
-        if container in [OFFICIAL_DOCUMENTS_CONTAINER_NAME, NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME]:
-            openai_client = AsyncAzureOpenAI(
-                azure_endpoint=OPENAI_ENDPOINT,
-                api_version=OPENAI_API_VERSION,
-                api_key=os.getenv("AZURE_OPENAI_API_KEY")
-            )
-            if doc_dict.get("UserPrompt"):
-                user_prompt_vec = await get_embedding(openai_client, doc_dict["UserPrompt"], "text-embedding-ada-002")
-                if user_prompt_vec is None:
-                    raise HTTPException(status_code=500, detail="Failed to generate UserPromptVector embedding. Check Azure OpenAI configuration and logs.")
-                doc_dict["UserPromptVector"] = user_prompt_vec
-            if doc_dict.get("Query"):
-                query_vec = await get_embedding(openai_client, doc_dict["Query"], "text-embedding-ada-002")
-                if query_vec is None:
-                    raise HTTPException(status_code=500, detail="Failed to generate QueryVector embedding. Check Azure OpenAI configuration and logs.")
-                doc_dict["QueryVector"] = query_vec
+        await _maybe_add_embeddings(container, doc_dict)
 
         response = container_client.upsert_item(doc_dict)
         
@@ -352,9 +349,18 @@ async def update_document(
         cache_service.invalidate_container_cache(container)
         logger.info(f"Updated document and invalidated cache for container: {container}")
         
-        return response
+        return cosmos_item_to_feedback(response)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(
+            "update_document failed | container=%s | doc_id=%s | %s",
+            container,
+            doc_id,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.delete("/api/feedback/documents/{doc_id}")
 async def delete_document(
@@ -363,11 +369,8 @@ async def delete_document(
 ):
     validate_container_name(container)
     try:
-        credential = DefaultAzureCredential()
-        cosmos_client = CosmosClient(COSMOSDB_ENDPOINT, credential=credential)
-        database = cosmos_client.get_database_client(DATABASE_NAME)
-        container_client = database.get_container_client(container)
-        
+        container_client = get_container_client(container)
+
         # Delete from CosmosDB
         container_client.delete_item(item=doc_id, partition_key=doc_id)
         logger.info(f"Successfully deleted document {doc_id} from CosmosDB container {container}")

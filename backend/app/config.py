@@ -1,7 +1,27 @@
+import logging
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# backend/app/config.py -> backend/
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = BACKEND_ROOT / ".env"
+
+# Always load backend/.env (works when cwd is repo root or backend/)
+DOTENV_LOADED = load_dotenv(ENV_FILE)
+# Optional: also allow a .env in cwd to override (e.g. local experiments)
+load_dotenv(override=True)
+
+_config_logger = logging.getLogger(__name__)
+if not DOTENV_LOADED and not ENV_FILE.is_file():
+    _config_logger.warning(
+        "backend/.env not found at %s (cwd=%s). Cosmos/Postgres env vars may be missing.",
+        ENV_FILE,
+        os.getcwd(),
+    )
+elif DOTENV_LOADED:
+    _config_logger.info("Loaded environment from %s", ENV_FILE)
 
 
 SEARCH_SERVICE_NAME = "blitz-ai-search"
@@ -13,8 +33,32 @@ OPENAI_DEPLOYMENT = "text-embedding-ada-002"
 OPENAI_API_VERSION = "2025-03-01-preview"
 OPENAI_EMBEDDING_DIMENSIONS = 1536
 
-COSMOSDB_ENDPOINT = "https://blitz-queries.documents.azure.com:443/"
-DATABASE_NAME = "sports"
+def _env_first(*names: str, default: str | None = None) -> str | None:
+    """Read env var from first matching name; strip quotes from .env values."""
+    for name in names:
+        raw = os.getenv(name)
+        if raw is not None and str(raw).strip() != "":
+            return str(raw).strip().strip('"').strip("'")
+    return default
+
+
+# Cosmos: accept COSMOSDB_* (code) and COSMOS_DB_* (legacy prod naming)
+COSMOSDB_ENDPOINT = _env_first(
+    "COSMOSDB_ENDPOINT",
+    "COSMOS_DB_ENDPOINT",
+    default="https://blitz-queries.documents.azure.com:443/",
+)
+COSMOSDB_KEY = _env_first("COSMOSDB_KEY", "COSMOS_DB_KEY")
+COSMOSDB_CONNECTION_STRING = _env_first(
+    "COSMOSDB_CONNECTION_STRING",
+    "COSMOS_DB_CONNECTION_STRING",
+)
+DATABASE_NAME = _env_first(
+    "COSMOSDB_DATABASE",
+    "DATABASE_NAME",
+    "COSMOS_DATABASE_NAME",
+    default="sports",
+)
 OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb"
 UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME = "mlb-partner-feedback-helpful" 
 UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME = "mlb-partner-feedback-unhelpful" 
