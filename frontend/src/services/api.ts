@@ -1,28 +1,20 @@
 import axios from 'axios';
 import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
-// Use environment-specific API URLs
-const getBaseURL = () => {
-  // Check if we're running on localhost (development)
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
-    
-    // In development, use the Vite proxy
-    if (isLocalhost) {
-      return '/api';
-    }
-  }
-  
-  // In production (including Amplify), always use the Render backend
-  return 'https://blitzfrontend.onrender.com/api';
-};
+const API_BASE_URL = 'https://blitzfrontend.onrender.com/api';
+console.log('🚀 API Base URL:', API_BASE_URL);
 
 const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Debug logging for all requests
+api.interceptors.request.use(request => {
+  console.log('🌐 Making API request to:', (request.baseURL || '') + (request.url || ''));
+  return request;
 });
 
 export const generateInsights = async (request: GenerateInsightsRequest): Promise<ApiResponse> => {
@@ -62,9 +54,40 @@ export const getFeedbackContainers = async (): Promise<ContainersResponse> => {
   return response.data;
 };
 
+// Feedback Documents API
+export const getFeedbackDocuments = async (page: number = 1, container: string = 'nba-official') => {
+  const response = await api.get(`/feedback/documents?page=${page}&container=${container}`);
+  return response.data;
+};
+
+export const getAllFeedbackDocuments = async (container: string) => {
+  const response = await api.get(`/feedback/documents/all?container=${container}`);
+  return response.data;
+};
+
+export const searchFeedbackDocuments = async (query: string, container: string, field: string = 'UserPrompt') => {
+  const response = await api.get(`/feedback/documents/search?q=${encodeURIComponent(query)}&container=${container}&field=${field}`);
+  return response.data;
+};
+
+export const createFeedbackDocument = async (document: any, container: string) => {
+  const response = await api.post(`/feedback/documents?container=${container}`, document);
+  return response.data;
+};
+
+export const updateFeedbackDocument = async (docId: string, document: any, container: string) => {
+  const response = await api.put(`/feedback/documents/${docId}?container=${container}`, document);
+  return response.data;
+};
+
+export const deleteFeedbackDocument = async (docId: string, container: string) => {
+  const response = await api.delete(`/feedback/documents/${docId}?container=${container}`);
+  return response.data;
+};
+
 // Container definitions for UI
 export const containers: { id: ContainerType; name: string; description: string }[] = [
-  { id: 'mlb', name: 'MLB Official', description: 'Official MLB feedback documents' },
+  { id: 'mlb-official', name: 'MLB Official', description: 'Official MLB feedback documents' },
   { id: 'mlb-partner-feedback-helpful', name: 'MLB Partner Feedback (Helpful)', description: 'Helpful partner feedback documents' },
   { id: 'mlb-partner-feedback-unhelpful', name: 'MLB Partner Feedback (Unhelpful)', description: 'Unhelpful partner feedback documents' },
   { id: 'mlb-user-feedback', name: 'MLB User Feedback', description: 'User feedback documents' },

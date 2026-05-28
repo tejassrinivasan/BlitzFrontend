@@ -26,7 +26,7 @@ class CosmosService {
     });
     
     this.database = "sports";
-    this.container = "mlb";
+    this.container = "mlb-official";
     this.unofficialContainer = "mlb-user-feedback";
   }
 

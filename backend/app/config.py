@@ -59,7 +59,7 @@ DATABASE_NAME = _env_first(
     "COSMOS_DATABASE_NAME",
     default="sports",
 )
-OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb"
+OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-official"
 UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME = "mlb-partner-feedback-helpful" 
 UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME = "mlb-partner-feedback-unhelpful" 
 UNOFFICIAL_USER_FEEDBACK_HELPFUL_CONTAINER_NAME = "mlb-user-feedback"
@@ -70,9 +70,12 @@ NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-official"
 NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "nba-unofficial"
 MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-unofficial"
 
+# MLB Official Container (uses mlbfinal database schema)
+MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-official"
+
 # Container display mapping for UI
 CONTAINER_DISPLAY_NAMES = {
-    "mlb": "MLB Official",
+    "mlb-official": "MLB Official",
     "mlb-unofficial": "MLB Unofficial", 
     "nba-official": "NBA Official",
     "nba-unofficial": "NBA Unofficial"
@@ -90,6 +93,13 @@ AVAILABLE_DATABASES = {
         "host": POSTGRES_HOST,
         "port": POSTGRES_PORT,
         "database": "mlb",
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD
+    },
+    "mlbfinal": {
+        "host": POSTGRES_HOST,
+        "port": POSTGRES_PORT,
+        "database": "mlbfinal",
         "user": POSTGRES_USER,
         "password": POSTGRES_PASSWORD
     },

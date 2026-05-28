@@ -47,11 +47,20 @@ import {
 import { SearchIcon, EditIcon, DeleteIcon, ArrowUpIcon, RepeatIcon, ChevronRightIcon, ArrowBackIcon } from '@chakra-ui/icons';
 import debounce from 'lodash/debounce';
 import { FeedbackDocument } from '../server/services/cosmosService';
-import { executeQuery } from '../services/api';
+import { 
+  executeQuery, 
+  getFeedbackContainers, 
+  getAllFeedbackDocuments, 
+  getFeedbackDocuments, 
+  searchFeedbackDocuments,
+  createFeedbackDocument,
+  updateFeedbackDocument,
+  deleteFeedbackDocument
+} from '../services/api';
 import type { QueryResult } from '../types/api';
 
 type ContainerType = 
-  | 'mlb'
+  | 'mlb-official'
   | 'mlb-unofficial'
   | 'nba-official'
   | 'nba-unofficial';
@@ -126,17 +135,13 @@ function FeedbackDocuments() {
 
   const loadContainers = async () => {
     try {
-      const response = await fetch('/api/feedback/containers');
-      if (!response.ok) {
-        throw new Error('Failed to load containers');
-      }
-      const data = await response.json();
+      const data = await getFeedbackContainers();
       setContainers(data.containers);
     } catch (error) {
       console.error('Error loading containers:', error);
       // Fallback to default containers
       setContainers([
-        { value: 'mlb', label: 'MLB Official' },
+        { value: 'mlb-official', label: 'MLB Official' },
         { value: 'mlb-unofficial', label: 'MLB Unofficial' },
         { value: 'nba-official', label: 'NBA Official' },
         { value: 'nba-unofficial', label: 'NBA Unofficial' }
@@ -170,17 +175,9 @@ function FeedbackDocuments() {
         return;
       }
       
-      const endpoint = search
-        ? `/api/feedback/documents/search?q=${encodeURIComponent(search)}&container=${selectedContainer}`
-        : `/api/feedback/documents?page=${pageNum}&container=${selectedContainer}`;
-      
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch documents');
-      }
-
-      const data = await response.json();
+      const data = search
+        ? await searchFeedbackDocuments(search, selectedContainer)
+        : await getFeedbackDocuments(pageNum, selectedContainer);
       
       if (pageNum === 1) {
         setDocuments(data);
@@ -228,34 +225,9 @@ function FeedbackDocuments() {
     try {
       setLoadingAllDocuments(true);
       
-      // Check if we already have all documents in cache
-      const cachedDocs = documentCache[selectedContainer];
-      if (cachedDocs && cachedDocs.length > 50) { // Assume cache is reasonably complete if > 50 docs
-        setDocuments(cachedDocs);
-        setHasMore(false);
-        setShowAllMode(true);
-        
-        toast({
-          title: 'All documents loaded from cache',
-          description: `${cachedDocs.length} documents`,
-          status: 'success',
-          duration: 2000,
-          isClosable: true,
-        });
-        
-        setLoadingAllDocuments(false);
-        return;
-      }
-      
-      // Use the optimized /all endpoint for better performance
-      const endpoint = `/api/feedback/documents/all?container=${selectedContainer}`;
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch all documents');
-      }
-
-      const allDocs = await response.json();
+      // Always fetch ALL documents from the database - no cache assumptions
+      console.log(`Fetching ALL documents for container: ${selectedContainer}`);
+      const allDocs = await getAllFeedbackDocuments(selectedContainer);
       
       setDocuments(allDocs);
       setHasMore(false);
@@ -269,12 +241,15 @@ function FeedbackDocuments() {
       
       toast({
         title: 'All documents loaded',
-        description: `Loaded ${allDocs.length} documents`,
+        description: `Loaded ${allDocs.length} total documents from database`,
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
+      
+      console.log(`Successfully loaded ${allDocs.length} documents for ${selectedContainer}`);
     } catch (error) {
+      console.error('Error loading all documents:', error);
       toast({
         title: 'Error',
         description: 'Failed to load all documents',
@@ -296,12 +271,7 @@ function FeedbackDocuments() {
     setPreloadingContainers(prev => new Set([...prev, container]));
     
     try {
-      const response = await fetch(`/api/feedback/documents/all?container=${container}`);
-      if (!response.ok) {
-        throw new Error('Failed to preload documents');
-      }
-      
-      const allDocs = await response.json();
+      const allDocs = await getAllFeedbackDocuments(container);
       
       setDocumentCache(prev => ({
         ...prev,
@@ -406,7 +376,7 @@ function FeedbackDocuments() {
     fetchDocuments(1);
     
     // Preload other containers in the background for faster switching
-    const otherContainers: ContainerType[] = ['nba-official', 'nba-unofficial', 'mlb', 'mlb-unofficial'];
+    const otherContainers: ContainerType[] = ['nba-official', 'nba-unofficial', 'mlb-official', 'mlb-unofficial'];
     const containersToPreload = otherContainers.filter(c => c !== selectedContainer);
     
     // Staggered preloading to avoid overwhelming the server
@@ -419,22 +389,10 @@ function FeedbackDocuments() {
 
   const handleCreate = async () => {
     try {
-      const response = await fetch(`/api/feedback/documents?container=${selectedContainer}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          UserPrompt: '',
-          Query: ''
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create document');
-      }
-
-      const newDoc = await response.json();
+      const newDoc = await createFeedbackDocument({
+        UserPrompt: '',
+        Query: ''
+      }, selectedContainer);
       setDocuments(prev => [newDoc, ...prev]);
       setEditingDoc(newDoc);
       
@@ -466,19 +424,7 @@ function FeedbackDocuments() {
     if (!editingDoc?.id) return;
     
     try {
-      const response = await fetch(`/api/feedback/documents/${editingDoc.id}?container=${selectedContainer}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(editingDoc)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save document');
-      }
-
-      const savedDoc = await response.json();
+      const savedDoc = await updateFeedbackDocument(editingDoc.id, editingDoc, selectedContainer);
       setDocuments(docs => docs.map(doc => 
         doc.id === savedDoc.id ? savedDoc : doc
       ));
@@ -514,13 +460,7 @@ function FeedbackDocuments() {
     }
 
     try {
-      const response = await fetch(`/api/feedback/documents/${docId}?container=${selectedContainer}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete document');
-      }
+      await deleteFeedbackDocument(docId, selectedContainer);
 
       setDocuments(docs => docs.filter(doc => doc.id !== docId));
       if (editingDoc?.id === docId) {
@@ -556,11 +496,11 @@ function FeedbackDocuments() {
     const getTargetContainer = (sourceContainer: string): string => {
       switch (sourceContainer) {
         case 'mlb-unofficial':
-          return 'mlb';
+          return 'mlb-official';
         case 'nba-unofficial':
           return 'nba-official';
         default:
-          return 'mlb'; // Fallback
+          return 'mlb-official'; // Fallback
       }
     };
 
@@ -588,7 +528,7 @@ function FeedbackDocuments() {
         return updated;
       });
       
-      const targetLabel = targetContainer === 'mlb' ? 'MLB Official' : 'NBA Official';
+      const targetLabel = targetContainer === 'mlb-official' ? 'MLB Official' : 'NBA Official';
       
       toast({
         title: 'Document transferred',
@@ -670,14 +610,8 @@ function FeedbackDocuments() {
 
       // Update each document
       await Promise.all(
-        updates.map(doc =>
-          fetch(`/api/feedback/documents/${doc.id}?container=${selectedContainer}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(doc)
-          })
+        updates.filter(doc => doc.id).map(doc =>
+          updateFeedbackDocument(doc.id!, doc, selectedContainer)
         )
       );
 
@@ -763,7 +697,7 @@ function FeedbackDocuments() {
 
   // Helper function to get default database based on container
   const getDefaultDatabase = () => {
-    return selectedContainer === 'nba-official' || selectedContainer === 'nba-unofficial' ? 'nba' : 'mlb';
+    return selectedContainer === 'nba-official' || selectedContainer === 'nba-unofficial' ? 'nba' : 'mlbfinal';
   };
 
   const handleRunQuery = async (docId: string, query: string) => {
@@ -1226,6 +1160,7 @@ function FeedbackDocuments() {
                             width="140px"
                           >
                             <option value="mlb">MLB Database</option>
+                            <option value="mlbfinal">MLB Final Database</option>
                             <option value="nba">NBA Database</option>
                           </Select>
                           <Button

@@ -32,7 +32,7 @@ import {
   Textarea,
 } from '@chakra-ui/react';
 import { CopyIcon, DownloadIcon } from '@chakra-ui/icons';
-import { containers } from '../services/api';
+import { containers, getAllFeedbackDocuments } from '../services/api';
 import type { ContainerType, FeedbackDocument } from '../types/api';
 
 interface UserPrompt {
@@ -46,7 +46,7 @@ interface UserPrompt {
 function UserPrompts() {
   const [userPrompts, setUserPrompts] = useState<UserPrompt[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedContainers, setSelectedContainers] = useState<ContainerType[]>(['mlb']);
+  const [selectedContainers, setSelectedContainers] = useState<ContainerType[]>(['mlb-official']);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyText, setCopyText] = useState('');
   const toast = useToast();
@@ -64,18 +64,15 @@ function UserPrompts() {
       
       for (const container of selectedContainers) {
         try {
-          const response = await fetch(`/api/feedback/documents/all?container=${encodeURIComponent(container)}`);
-          if (response.ok) {
-            const data = await response.json();
-            const containerPrompts: UserPrompt[] = data.map((doc: FeedbackDocument) => ({
-              id: doc.id || '',
-              UserPrompt: doc.UserPrompt,
-              container,
-              Query: doc.Query,
-              AssistantPrompt: doc.AssistantPrompt,
-            }));
-            allPrompts.push(...containerPrompts);
-          }
+          const data = await getAllFeedbackDocuments(container);
+          const containerPrompts: UserPrompt[] = data.map((doc: FeedbackDocument) => ({
+            id: doc.id || '',
+            UserPrompt: doc.UserPrompt,
+            container,
+            Query: doc.Query,
+            AssistantPrompt: doc.AssistantPrompt,
+          }));
+          allPrompts.push(...containerPrompts);
         } catch (error) {
           console.error(`Error fetching from container ${container}:`, error);
         }
