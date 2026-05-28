@@ -1,8 +1,20 @@
 import axios from 'axios';
 import type { GenerateInsightsRequest, ConversationRequest, ApiResponse, QueryRequest, QueryResult, DatabaseInfo, ContainersResponse, ContainerType } from '../types/api';
 
-const API_BASE_URL = 'https://blitzfrontend.onrender.com/api';
-console.log('🚀 API Base URL:', API_BASE_URL);
+function resolveApiBaseUrl(): string {
+  const fromEnv = (import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } }).env
+    ?.VITE_API_BASE_URL;
+  if (fromEnv) return fromEnv;
+
+  const isLocal =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  // Vite dev server proxies /api -> http://127.0.0.1:8000
+  return isLocal ? '/api' : 'https://blitzfrontend.onrender.com/api';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+console.log('API Base URL:', API_BASE_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,

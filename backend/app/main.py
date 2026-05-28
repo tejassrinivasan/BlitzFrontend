@@ -20,6 +20,7 @@ from .config import (
     NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
     MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
     MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    MLB_OFFICIAL_COSMOS_CONTAINER_ID,
     CONTAINER_DISPLAY_NAMES,
     OPENAI_ENDPOINT,
     OPENAI_API_VERSION,
@@ -35,6 +36,7 @@ from .cosmos_service import (
     get_container_client as _get_cosmos_container_client,
     log_cosmos_config_probe,
 )
+from .middleware import log_requests_middleware
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +49,8 @@ ALLOWED_CONTAINERS = {
     MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     NBA_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
     NBA_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME,
+    # Legacy Cosmos container id (pre-rename); UI now uses mlb-official
+    "mlb",
     # Keep legacy containers for backwards compatibility
     UNOFFICIAL_PARTNER_FEEDBACK_HELPFUL_CONTAINER_NAME,
     UNOFFICIAL_PARTNER_FEEDBACK_UNHELPFUL_CONTAINER_NAME,
@@ -104,6 +108,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 app.add_middleware(RequestSizeLimitMiddleware, max_size=10 * 1024 * 1024)  # 10MB limit
+app.middleware("http")(log_requests_middleware)
 
 @app.on_event("startup")
 async def startup_event():
@@ -172,10 +177,20 @@ async def get_embedding(client: AsyncAzureOpenAI, text: str, model: str) -> List
         logger.error(f"Error generating embedding: {e}")
         return None
 
+def resolve_cosmos_container_id(container_name: str) -> str:
+    """Map API container names to actual Cosmos container ids."""
+    if container_name == MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME:
+        return MLB_OFFICIAL_COSMOS_CONTAINER_ID or container_name
+    return container_name
+
+
 def get_container_client(container_name: str):
     """Get a container client with validation and verbose Cosmos diagnostics."""
     validate_container_name(container_name)
-    return _get_cosmos_container_client(container_name)
+    cosmos_id = resolve_cosmos_container_id(container_name)
+    if cosmos_id != container_name:
+        logger.info("Cosmos container alias: %s -> %s", container_name, cosmos_id)
+    return _get_cosmos_container_client(cosmos_id)
 
 @app.get("/api/feedback/documents", response_model=List[FeedbackDocument])
 async def get_documents(

@@ -443,12 +443,19 @@ function FeedbackDocuments() {
         duration: 2000,
         isClosable: true,
       });
-    } catch (error) {
+    } catch (error: unknown) {
+      const message =
+        error && typeof error === 'object' && 'response' in error
+          ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : error instanceof Error
+            ? error.message
+            : 'Failed to save document';
+      console.error('Save document failed:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save document',
+        description: message || 'Failed to save document',
         status: 'error',
-        duration: 3000,
+        duration: 5000,
         isClosable: true,
       });
     }

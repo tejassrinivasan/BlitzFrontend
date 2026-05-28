@@ -72,6 +72,11 @@ MLB_UNOFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-unofficial"
 
 # MLB Official Container (uses mlbfinal database schema)
 MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME = "mlb-official"
+# Cosmos container id when it differs from API name (e.g. legacy "mlb" in Azure)
+MLB_OFFICIAL_COSMOS_CONTAINER_ID = _env_first(
+    "MLB_OFFICIAL_COSMOS_CONTAINER",
+    default=MLB_OFFICIAL_DOCUMENTS_CONTAINER_NAME,
+)
 
 # Container display mapping for UI
 CONTAINER_DISPLAY_NAMES = {
